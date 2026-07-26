@@ -1,0 +1,225 @@
+# Three WordPress installations so the local -> staging -> production
+# promotion flow can be exercised end to end on one machine.
+#
+#   docker compose up -d
+#   docker compose --profile setup run --rm setup
+#
+#   local       http://localhost:8091   (release source)
+#   staging     http://localhost:8092   (verification gate)
+#   production  http://localhost:8093   (promotion target, restricted PHP)
+#   mailpit     http://localhost:8094
+#
+# Browsers reach the sites on localhost ports; the sites reach each other by
+# service name on the compose network (http://fsync_stg/, http://fsync_prod/).
+# That asymmetry is why a peer's connection URL is configurable separately from
+# its home_url -- which is also what a real site behind a load balancer or an
+# internal hostname needs.
+#
+# Production deliberately runs with a restrictive php.ini. Chunk negotiation and
+# the time budget are only meaningfully tested against a host that actually cuts
+# requests short.
+
+x-wp-env: &wp-env
+  WORDPRESS_DB_USER: wordpress
+  WORDPRESS_DB_PASSWORD: wordpress
+  WORDPRESS_DB_NAME: wordpress
+
+# The WordPress image does not bake WORDPRESS_CONFIG_EXTRA into wp-config.php;
+# it eval()s it from the environment on every request. So every container that
+# boots WordPress -- web AND wp-cli -- must be given the same value, or they end
+# up with different encryption keys for the same site and nothing that one
+# process encrypts can be read by the other.
+x-config-local: &config-local |
+  defined('WP_ENVIRONMENT_TYPE') || define('WP_ENVIRONMENT_TYPE', 'local');
+  defined('WP_DEBUG') || define('WP_DEBUG', true);
+  defined('WP_DEBUG_LOG') || define('WP_DEBUG_LOG', true);
+  defined('WP_DEBUG_DISPLAY') || define('WP_DEBUG_DISPLAY', false);
+  defined('FS_METHOD') || define('FS_METHOD', 'direct');
+  defined('DISABLE_WP_CRON') || define('DISABLE_WP_CRON', true);
+  defined('FSYNC_ENCRYPTION_KEY') || define('FSYNC_ENCRYPTION_KEY', 'ZmxhcmVzLXN5bmMtbG9jYWwtZGV2LWtleS0zMmJ5dGU=');
+
+x-config-stg: &config-stg |
+  defined('WP_ENVIRONMENT_TYPE') || define('WP_ENVIRONMENT_TYPE', 'staging');
+  defined('WP_DEBUG') || define('WP_DEBUG', true);
+  defined('WP_DEBUG_LOG') || define('WP_DEBUG_LOG', true);
+  defined('WP_DEBUG_DISPLAY') || define('WP_DEBUG_DISPLAY', false);
+  defined('FS_METHOD') || define('FS_METHOD', 'direct');
+  defined('DISABLE_WP_CRON') || define('DISABLE_WP_CRON', true);
+  defined('FSYNC_ENCRYPTION_KEY') || define('FSYNC_ENCRYPTION_KEY', 'ZmxhcmVzLXN5bmMtc3RhZ2luZy1kZXYta2V5LTMyYnk=');
+
+x-config-prod: &config-prod |
+  defined('WP_ENVIRONMENT_TYPE') || define('WP_ENVIRONMENT_TYPE', 'production');
+  defined('WP_DEBUG') || define('WP_DEBUG', true);
+  defined('WP_DEBUG_LOG') || define('WP_DEBUG_LOG', true);
+  defined('WP_DEBUG_DISPLAY') || define('WP_DEBUG_DISPLAY', false);
+  defined('FS_METHOD') || define('FS_METHOD', 'direct');
+  defined('DISABLE_WP_CRON') || define('DISABLE_WP_CRON', true);
+  defined('FSYNC_ENCRYPTION_KEY') || define('FSYNC_ENCRYPTION_KEY', 'ZmxhcmVzLXN5bmMtcHJvZC1kZXYta2V5LTMyYnl0ZXM=');
+
+x-db: &db
+  image: mariadb:10.6
+  restart: unless-stopped
+  environment:
+    MYSQL_DATABASE: wordpress
+    MYSQL_USER: wordpress
+    MYSQL_PASSWORD: wordpress
+    MYSQL_ROOT_PASSWORD: wordpress_root
+  healthcheck:
+    test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+    interval: 10s
+    timeout: 5s
+    retries: 10
+
+services:
+  # --- local: the release source -------------------------------------------
+  db_local:
+    <<: *db
+    volumes:
+      - db_local_data:/var/lib/mysql
+
+  fsync_local:
+    image: wordpress:php8.2-apache
+    restart: unless-stopped
+    depends_on:
+      db_local:
+        condition: service_healthy
+    ports:
+      - "8091:80"
+    environment:
+      <<: *wp-env
+      WORDPRESS_DB_HOST: db_local:3306
+      WORDPRESS_CONFIG_EXTRA: *config-local
+    volumes:
+      - wp_local_data:/var/www/html
+      - .:/var/www/html/wp-content/plugins/flares-sync:ro
+
+  # --- staging: the verification gate --------------------------------------
+  db_stg:
+    <<: *db
+    volumes:
+      - db_stg_data:/var/lib/mysql
+
+  fsync_stg:
+    image: wordpress:php8.2-apache
+    restart: unless-stopped
+    depends_on:
+      db_stg:
+        condition: service_healthy
+    ports:
+      - "8092:80"
+    environment:
+      <<: *wp-env
+      WORDPRESS_DB_HOST: db_stg:3306
+      WORDPRESS_CONFIG_EXTRA: *config-stg
+    volumes:
+      - wp_stg_data:/var/www/html
+      - .:/var/www/html/wp-content/plugins/flares-sync:ro
+
+  # --- production: the promotion target, on a deliberately mean host -------
+  db_prod:
+    <<: *db
+    volumes:
+      - db_prod_data:/var/lib/mysql
+
+  fsync_prod:
+    image: wordpress:php8.2-apache
+    restart: unless-stopped
+    depends_on:
+      db_prod:
+        condition: service_healthy
+    ports:
+      - "8093:80"
+    environment:
+      <<: *wp-env
+      WORDPRESS_DB_HOST: db_prod:3306
+      WORDPRESS_CONFIG_EXTRA: *config-prod
+    volumes:
+      - wp_prod_data:/var/www/html
+      - .:/var/www/html/wp-content/plugins/flares-sync:ro
+      - ./docker/php-restrictive.ini:/usr/local/etc/php/conf.d/zz-restrictive.ini:ro
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      # The 808x range is commonly taken by other local WordPress projects, so
+      # this stack sits at 809x.
+      - "8094:8025"
+
+  # --- one-shot installer for all three sites ------------------------------
+  setup:
+    image: wordpress:cli-php8.2
+    profiles: ["setup"]
+    depends_on:
+      db_local:
+        condition: service_healthy
+      db_stg:
+        condition: service_healthy
+      db_prod:
+        condition: service_healthy
+    # wp-config.php resolves these with getenv() at runtime, so wp-cli needs
+    # them too. This one container drives three sites, so the values that differ
+    # per site are passed in separately and exported per command in setup.sh.
+    environment:
+      <<: *wp-env
+      FSYNC_CONFIG_LOCAL: *config-local
+      FSYNC_CONFIG_STG: *config-stg
+      FSYNC_CONFIG_PROD: *config-prod
+    volumes:
+      - wp_local_data:/sites/local
+      - wp_stg_data:/sites/staging
+      - wp_prod_data:/sites/production
+      # The plugin has to be visible inside each site tree, not just mounted
+      # somewhere: wp-cli activates it by looking in that site's plugins
+      # directory, and the site volumes do not carry the bind mount that the
+      # web containers have.
+      - .:/sites/local/wp-content/plugins/flares-sync:ro
+      - .:/sites/staging/wp-content/plugins/flares-sync:ro
+      - .:/sites/production/wp-content/plugins/flares-sync:ro
+      - ./docker/setup.sh:/setup.sh:ro
+    entrypoint: ["/bin/sh", "/setup.sh"]
+
+  # --- interactive wp-cli, one per site ------------------------------------
+  wpcli_local:
+    image: wordpress:cli-php8.2
+    profiles: ["tools"]
+    environment:
+      <<: *wp-env
+      WORDPRESS_DB_HOST: db_local:3306
+      WORDPRESS_CONFIG_EXTRA: *config-local
+    volumes:
+      - wp_local_data:/var/www/html
+      - .:/var/www/html/wp-content/plugins/flares-sync:ro
+    working_dir: /var/www/html
+
+  wpcli_stg:
+    image: wordpress:cli-php8.2
+    profiles: ["tools"]
+    environment:
+      <<: *wp-env
+      WORDPRESS_DB_HOST: db_stg:3306
+      WORDPRESS_CONFIG_EXTRA: *config-stg
+    volumes:
+      - wp_stg_data:/var/www/html
+      - .:/var/www/html/wp-content/plugins/flares-sync:ro
+    working_dir: /var/www/html
+
+  wpcli_prod:
+    image: wordpress:cli-php8.2
+    profiles: ["tools"]
+    environment:
+      <<: *wp-env
+      WORDPRESS_DB_HOST: db_prod:3306
+      WORDPRESS_CONFIG_EXTRA: *config-prod
+    volumes:
+      - wp_prod_data:/var/www/html
+      - .:/var/www/html/wp-content/plugins/flares-sync:ro
+    working_dir: /var/www/html
+
+volumes:
+  db_local_data:
+  db_stg_data:
+  db_prod_data:
+  wp_local_data:
+  wp_stg_data:
+  wp_prod_data:
