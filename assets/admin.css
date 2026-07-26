@@ -4,6 +4,27 @@
     border-top: 1px solid #dcdcde;
 }
 
+.fsync-brand {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 18px 0 24px;
+}
+
+.fsync-brand__logo {
+    display: block;
+    width: clamp(220px, 32vw, 320px);
+    height: auto;
+}
+
+.fsync-brand__section {
+    color: #50575e;
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
 .fsync h3 {
     margin-bottom: .4em;
 }
@@ -115,6 +136,16 @@
 }
 
 @media (max-width: 782px) {
+    .fsync-brand {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .fsync-brand__logo {
+        width: min(100%, 280px);
+    }
+
     .fsync-panel {
         padding: 16px;
     }

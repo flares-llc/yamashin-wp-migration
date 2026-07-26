@@ -19,7 +19,7 @@ final class Fsync_Admin_Health
     public static function render()
     {
         print '<div class="wrap fsync">';
-        print '<h1>Yamashin WP Migration — 診断</h1>';
+        Fsync_Admin::render_brand_header('診断');
 
         Fsync_Admin::render_notice();
 

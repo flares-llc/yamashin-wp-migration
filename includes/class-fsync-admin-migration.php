@@ -32,7 +32,7 @@ final class Fsync_Admin_Migration
             return;
         }
         print '<div class="wrap fsync-admin">';
-        print '<h1>Yamashin WP Migration — 移行</h1>';
+        Fsync_Admin::render_brand_header('移行');
         Fsync_Admin::render_notice();
         self::render_one_time_token();
         self::render_create();

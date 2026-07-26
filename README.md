@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo-yamashin-wp-migration.png" width="180" alt="Yamashin WP Migration" />
+  <img src="assets/brand/yamashin-wp-migration-vertical-white.svg" width="180" alt="Yamashin WP Migration" />
 </p>
 
 # Yamashin WP Migration
