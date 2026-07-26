@@ -2,7 +2,7 @@
 /**
  * Consume a pairing blob and exercise the authenticated path end to end.
  *
- *   wp eval-file .../connect.php <blob> <env_name>
+ *   wp eval-file .../connect.php <blob> <env_name> [source_connect_url]
  *
  * This is the part the standalone suite cannot cover: two real WordPress
  * installations, a real HTTP hop, and a real database on both ends.
@@ -14,6 +14,7 @@ if (! defined('WP_CLI') || ! WP_CLI) {
 
 $blob = $args[0] ?? '';
 $env_name = $args[1] ?? 'staging';
+$source_connect_url = trim((string) ($args[2] ?? ''));
 
 if ($blob === '') {
     WP_CLI::error('usage: connect.php <blob> [env_name]');
@@ -57,7 +58,20 @@ function fsync_check($condition, $label)
 
 WP_CLI::log('--- pairing ---');
 
+$source_url_filter = null;
+if ($source_connect_url !== '') {
+    $source_connect_url = untrailingslashit($source_connect_url);
+    $source_url_filter = static function ($url, $path) use ($source_connect_url) {
+        return $source_connect_url . '/' . ltrim((string) $path, '/');
+    };
+    add_filter('home_url', $source_url_filter, 10, 2);
+}
+
 $result = Fsync_Pairing::connect($blob, $env_name);
+
+if ($source_url_filter !== null) {
+    remove_filter('home_url', $source_url_filter, 10);
+}
 
 if (is_wp_error($result)) {
     WP_CLI::error(sprintf('pairing failed: [%s] %s', $result->get_error_code(), $result->get_error_message()));
