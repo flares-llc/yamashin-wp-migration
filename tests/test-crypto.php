@@ -79,7 +79,9 @@ T::group('Fsync_Crypto key change detection');
 // regenerates the WordPress salts, or edits the constant, and every credential
 // stops decrypting. The error must name the cause.
 $rotated = new ReflectionProperty('Fsync_Crypto', 'master');
-$rotated->setAccessible(true);
+if (PHP_VERSION_ID < 80100) {
+    $rotated->setAccessible(true);
+}
 $rotated->setValue(null, array(
     'key' => str_repeat("\x22", 32),
     'ref' => substr(hash('sha256', 'fsync-key-ref|' . str_repeat("\x22", 32)), 0, 16),
