@@ -37,8 +37,12 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           notes_args=(--generate-notes)
-          if [[ -f "docs/releases/${version}.md" ]]; then
-            notes_args=(--notes-file "docs/releases/${version}.md")
+          notes_file="docs/releases/${GITHUB_REF_NAME}.md"
+          if [[ ! -f "$notes_file" ]]; then
+            notes_file="docs/releases/${version}.md"
+          fi
+          if [[ -f "$notes_file" ]]; then
+            notes_args=(--notes-file "$notes_file")
           fi
           gh release create "$GITHUB_REF_NAME" \
             "dist/yamashin-wp-migration-${version}.zip" \

@@ -3,7 +3,7 @@
  * Plugin Name: Yamashin WP Migration
  * Plugin URI: https://github.com/flares-llc/yamashin-wp-migration
  * Description: WordPress 環境間でサイト全体の差分検知、ドライラン、適用、検証、ロールバックを安全に行います。
- * Version: 1.0.0
+ * Version: 1.0.1
  * Requires at least: 6.0
  * Requires PHP: 8.0
  * Author: 山真研究室
@@ -17,7 +17,7 @@ if (! defined('ABSPATH')) {
     exit;
 }
 
-define('FSYNC_VERSION', '1.0.0');
+define('FSYNC_VERSION', '1.0.1');
 define('FSYNC_SLUG', 'flares-sync');
 define('FSYNC_PREFIX', 'fsync');
 define('FSYNC_FILE', __FILE__);

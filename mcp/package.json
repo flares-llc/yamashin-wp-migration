@@ -1,6 +1,6 @@
 {
   "name": "yamashin-wp-migration-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "stdio bridge for the Yamashin WP Migration Streamable HTTP MCP server",
   "type": "module",
   "bin": {

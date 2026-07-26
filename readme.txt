@@ -4,7 +4,7 @@ Tags: migration, staging, rollback, mcp, hmac
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 8.0
-Stable tag: 1.0.0
+Stable tag: 1.0.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -53,6 +53,13 @@ Yamashin WP Migrationは、ローカル、ステージング、本番を明示�
 はい。専用トークンとcapabilityを持つStreamable HTTP MCP、およびstdioブリッジを提供します。適用とロールバックには正確な識別子、plan_hash、明示確認が必要です。
 
 == Changelog ==
+
+= 1.0.1 =
+
+* 山真Appsのブランド仕様に合わせてロゴとWordPress管理画面ヘッダーを更新
+* PHP 8.5の継続検証を追加し、互換性警告を解消
+* staging／production検証を繰り返し実行できるよう、Compose内URLの照合を修正
+* GitHub Actionsランタイムと最小WordPress互換情報を更新
 
 = 1.0.0 =
 
