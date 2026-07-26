@@ -1,0 +1,8 @@
+/.gitattributes export-ignore
+/.gitignore export-ignore
+/HANDOFF.md export-ignore
+/SECURITY.md export-ignore
+/compose.yaml export-ignore
+/docker export-ignore
+/scripts export-ignore
+/tests export-ignore

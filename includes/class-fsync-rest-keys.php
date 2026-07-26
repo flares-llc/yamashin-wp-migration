@@ -133,7 +133,18 @@ final class Fsync_Rest_Keys
             return new WP_Error('fsync_signature_invalid', '署名が一致しません。', array('status' => 401));
         }
 
-        return Fsync_Nonce_Store::remember($key_id, (string) $request->get_header(Fsync_Signer::HEADER_NONCE));
+        $remembered = Fsync_Nonce_Store::remember(
+            $key_id,
+            (string) $request->get_header(Fsync_Signer::HEADER_NONCE)
+        );
+        if (is_wp_error($remembered)) {
+            return $remembered;
+        }
+
+        // The initial confirmation must obey the same source-IP restriction
+        // as every request made after activation. Otherwise a stolen blob can
+        // be consumed from an address the operator explicitly denied.
+        return Fsync_Auth::check_ip($key);
     }
 
     /**
@@ -192,11 +203,14 @@ final class Fsync_Rest_Keys
 
     /**
      * @param WP_REST_Request $request
-     * @return WP_REST_Response
+     * @return WP_REST_Response|WP_Error
      */
     public static function retire($request)
     {
-        Fsync_Keys::retire((string) $request->get_param('key_id'));
+        $retired = Fsync_Keys::retire((string) $request->get_param('key_id'));
+        if (is_wp_error($retired)) {
+            return Fsync_Rest::error($retired);
+        }
 
         return Fsync_Rest::respond(array('ok' => true));
     }

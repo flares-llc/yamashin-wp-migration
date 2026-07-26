@@ -47,6 +47,11 @@ final class Fsync_Auth
      */
     public static function authorize($request, $capability)
     {
+        // Long-running CLI workers and internal REST dispatches can authorize
+        // more than one request in a PHP process. Never let a later failure
+        // expose the key from an earlier successful request.
+        self::$current = null;
+
         $result = self::run_checks($request, $capability);
 
         if (is_wp_error($result)) {
@@ -212,7 +217,7 @@ final class Fsync_Auth
      * @param array $key
      * @return true|WP_Error
      */
-    private static function check_ip(array $key)
+    public static function check_ip(array $key)
     {
         if ($key['ip_allowlist'] === array()) {
             return true;
@@ -268,12 +273,34 @@ final class Fsync_Auth
             return $remote;
         }
 
-        // The left-most entry is the original client; everything after it was
-        // appended by intermediaries.
-        $parts = array_map('trim', explode(',', $forwarded));
-        $candidate = $parts[0] ?? '';
+        // Walk from the server side of the chain. A trusted proxy may append to
+        // a header the caller already supplied; blindly taking the left-most
+        // entry would therefore let that caller choose its apparent address.
+        $chain = array();
+        foreach (array_map('trim', explode(',', $forwarded)) as $candidate) {
+            if (filter_var($candidate, FILTER_VALIDATE_IP)) {
+                $chain[] = $candidate;
+            }
+        }
+        $chain[] = $remote;
 
-        return filter_var($candidate, FILTER_VALIDATE_IP) ? $candidate : $remote;
+        for ($index = count($chain) - 1; $index >= 0; $index--) {
+            $candidate = $chain[$index];
+            $candidate_is_trusted = false;
+
+            foreach ($trusted as $cidr) {
+                if (self::ip_matches($candidate, (string) $cidr)) {
+                    $candidate_is_trusted = true;
+                    break;
+                }
+            }
+
+            if (! $candidate_is_trusted) {
+                return $candidate;
+            }
+        }
+
+        return $chain[0] ?? $remote;
     }
 
     /**
@@ -293,10 +320,18 @@ final class Fsync_Auth
         }
 
         if (strpos($pattern, '/') === false) {
-            return $ip === $pattern;
+            $ip_packed = @inet_pton($ip);
+            $pattern_packed = @inet_pton($pattern);
+
+            return $ip_packed !== false
+                && $pattern_packed !== false
+                && hash_equals($ip_packed, $pattern_packed);
         }
 
         list($subnet, $bits) = explode('/', $pattern, 2);
+        if (preg_match('/^[0-9]+$/', $bits) !== 1) {
+            return false;
+        }
         $bits = (int) $bits;
 
         $ip_packed = @inet_pton($ip);

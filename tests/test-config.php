@@ -66,6 +66,49 @@ T::same(
 
 T::is_error(Fsync_Config_Io::parse('{not json'), 'fsync_config_parse_failed', 'malformed JSON is an error');
 T::is_error(Fsync_Config_Io::parse('"a string"'), 'fsync_config_not_object', 'a scalar document is rejected');
+T::is_error(Fsync_Config_Io::parse('[{"config_version":1}]'), 'fsync_config_not_object', 'a list document is rejected');
+T::is_error(Fsync_Config_Io::parse('[]'), 'fsync_config_not_object', 'an empty list is rejected');
+T::is_error(
+    Fsync_Config_Io::parse('{"config_version":1} /* unfinished'),
+    'fsync_config_parse_failed',
+    'an unterminated block comment is rejected'
+);
+
+T::group('Fsync_Config_Io::pretty');
+
+$pretty = Fsync_Config_Io::pretty(Fsync_Config::defaults());
+T::ok(! is_wp_error($pretty), 'the default document can be formatted');
+$pretty_object = is_wp_error($pretty) ? null : json_decode($pretty);
+T::ok(
+    is_object($pretty_object->sync->scope->post_types ?? null),
+    'an empty post_types map is encoded as an object'
+);
+T::ok(is_object($pretty_object->environments ?? null), 'an empty environments map is encoded as an object');
+T::ok(is_object($pretty_object->storage ?? null), 'an empty storage map is encoded as an object');
+T::ok(is_object($pretty_object->notify ?? null), 'an empty notify map is encoded as an object');
+T::ok(is_array($pretty_object->sync->scope->tables ?? null), 'an empty tables list remains an array');
+T::ok(is_array($pretty_object->schedules ?? null), 'an empty schedules list remains an array');
+T::ok(
+    ! is_wp_error($pretty) && Fsync_Config_Io::parse($pretty) === Fsync_Config::defaults(),
+    'formatting preserves the PHP document after parsing'
+);
+
+$dynamic_maps = Fsync_Config::defaults();
+$dynamic_maps['sync']['scope']['post_types']['page'] = array('meta' => array());
+$dynamic_maps['sync']['scope']['taxonomies']['category'] = array();
+$dynamic_maps['sync']['scope']['refs']['related'] = array();
+$dynamic_maps['environments']['staging'] = array();
+$dynamic_maps['storage']['archive'] = array();
+$dynamic_maps['notify']['ops'] = array();
+$dynamic_pretty = Fsync_Config_Io::pretty($dynamic_maps);
+$dynamic_object = is_wp_error($dynamic_pretty) ? null : json_decode($dynamic_pretty);
+T::ok(is_object($dynamic_object->sync->scope->post_types->page ?? null), 'an empty post type rule remains an object');
+T::ok(is_object($dynamic_object->sync->scope->post_types->page->meta ?? null), 'an empty meta rule remains an object');
+T::ok(is_object($dynamic_object->sync->scope->taxonomies->category ?? null), 'an empty taxonomy rule remains an object');
+T::ok(is_object($dynamic_object->sync->scope->refs->related ?? null), 'an empty reference rule remains an object');
+T::ok(is_object($dynamic_object->environments->staging ?? null), 'an empty environment rule remains an object');
+T::ok(is_object($dynamic_object->storage->archive ?? null), 'an empty storage target remains an object');
+T::ok(is_object($dynamic_object->notify->ops ?? null), 'an empty notification target remains an object');
 
 T::group('Fsync_Config_Io::merge');
 
@@ -238,7 +281,8 @@ T::ok(! Fsync_Config_Validate::check($blob, $context)['ok'], 'a long base64 blob
 
 // Hashes are hex and legitimately appear; they must not be mistaken for keys.
 $hash = fsync_test_config(array('sync' => array('note' => str_repeat('a1b2c3d4', 8))));
-T::ok(Fsync_Config_Validate::check($hash, $context)['ok'], 'a hex hash is not mistaken for a secret');
+$hash_result = Fsync_Config_Validate::check($hash, $context);
+T::ok(! fsync_has_issue($hash_result, 'secret_in_config'), 'a hex hash is not mistaken for a secret');
 
 $as_value = fsync_test_config(
     array('environments' => array('staging' => array('credential' => 'not a valid id!!')))
@@ -259,6 +303,39 @@ $deny = fsync_test_config(
     array('sync' => array('scope' => array('options' => array('deny' => array('x')))))
 );
 T::ok(fsync_has_issue(Fsync_Config_Validate::check($deny, $context), 'options_deny_unsupported'), 'option deny lists are rejected');
+
+// A malformed pattern must never be accepted silently. In protected_extra it
+// would otherwise leave data unprotected; in the option allowlist it would
+// make the authored scope differ from what the operator intended.
+$bad_protected_pattern = fsync_test_config(
+    array('sync' => array('policy' => array('protected_extra' => array('/^secret(/'))))
+);
+$result = Fsync_Config_Validate::check($bad_protected_pattern, $context);
+T::ok(fsync_has_issue($result, 'invalid_pattern'), 'a malformed protected_extra pattern is rejected');
+T::same(
+    '/sync/policy/protected_extra/0',
+    fsync_pointer_for($result, 'invalid_pattern'),
+    'the malformed protected_extra pointer names the exact entry'
+);
+
+$bad_allow_pattern = fsync_test_config(
+    array('sync' => array('scope' => array('options' => array('allow' => array('/^public(/')))))
+);
+$result = Fsync_Config_Validate::check($bad_allow_pattern, $context);
+T::ok(fsync_has_issue($result, 'invalid_pattern'), 'a malformed option allow pattern is rejected');
+T::same(
+    '/sync/scope/options/allow/0',
+    fsync_pointer_for($result, 'invalid_pattern'),
+    'the malformed option pattern pointer names the exact entry'
+);
+
+$valid_pattern = fsync_test_config(
+    array('sync' => array('policy' => array('protected_extra' => array('/^secret_[a-z]+$/'))))
+);
+T::ok(
+    ! fsync_has_issue(Fsync_Config_Validate::check($valid_pattern, $context), 'invalid_pattern'),
+    'a valid protected_extra pattern is accepted'
+);
 
 $warned = fsync_test_config(
     array('sync' => array('scope' => array('options' => array('allow' => array('permalink_structure')))))
@@ -300,11 +377,105 @@ T::ok(fsync_has_issue(Fsync_Config_Validate::check($bad_conflict, $context), 'in
 $deletes = fsync_test_config(array('sync' => array('policy' => array('allow_delete' => true))));
 T::ok(fsync_has_issue(Fsync_Config_Validate::check($deletes, $context), 'delete_enabled'), 'enabling deletes warns');
 
+T::group('Fsync_Config_Validate schema enforcement');
+
+$string_version = fsync_test_config(array('config_version' => '1'));
+T::ok(fsync_has_issue(Fsync_Config_Validate::check($string_version, $context), 'schema_type'), 'a string config_version is rejected');
+
+$unknown_root = fsync_test_config(array('synk' => array()));
+T::ok(
+    fsync_has_issue(Fsync_Config_Validate::check($unknown_root, $context), 'schema_unknown_property'),
+    'an unknown top-level setting is rejected'
+);
+
+$unknown_scope = fsync_test_config(array('sync' => array('scope' => array('post_type' => array()))));
+T::ok(
+    fsync_has_issue(Fsync_Config_Validate::check($unknown_scope, $context), 'schema_unknown_property'),
+    'a misspelled nested setting is rejected'
+);
+
+$bad_meta_shape = fsync_test_config(
+    array('sync' => array('scope' => array('post_types' => array('page' => array('meta' => 'all')))))
+);
+T::ok(fsync_has_issue(Fsync_Config_Validate::check($bad_meta_shape, $context), 'schema_type'), 'a scalar meta rule is rejected');
+
+$missing_schedule_field = fsync_test_config(
+    array('schedules' => array(array('name' => 'daily', 'job' => 'backup')))
+);
+T::ok(
+    fsync_has_issue(Fsync_Config_Validate::check($missing_schedule_field, $context), 'schema_required'),
+    'a schedule missing its interval is rejected'
+);
+
+$scope_override_bypass = fsync_test_config(
+    array(
+        'sync' => array(
+            'scope_overrides' => array(
+                'production' => array('options' => array('allow' => array('siteurl'))),
+            ),
+        ),
+    )
+);
+$result = Fsync_Config_Validate::check($scope_override_bypass, $context);
+T::ok(fsync_has_issue($result, 'protected_option'), 'a scope override cannot enable a protected option');
+T::same(
+    '/sync/scope_overrides/production/options/allow/0',
+    fsync_pointer_for($result, 'protected_option'),
+    'the scope override error points into the authored override'
+);
+
+$environment_override_bypass = fsync_test_config(
+    array(
+        'environment_overrides' => array(
+            'production' => array(
+                'sync' => array('scope' => array('options' => array('allow' => array('siteurl')))),
+            ),
+        ),
+    )
+);
+$result = Fsync_Config_Validate::check($environment_override_bypass, $context);
+T::ok(fsync_has_issue($result, 'protected_option'), 'an environment override cannot enable a protected option');
+T::same(
+    '/environment_overrides/production/sync/scope/options/allow/0',
+    fsync_pointer_for($result, 'protected_option'),
+    'the environment override error points into the authored override'
+);
+
 T::group('Fsync_Config_Validate environments');
 
 $no_url = fsync_test_config();
 unset($no_url['environments']['production']['url']);
 T::ok(fsync_has_issue(Fsync_Config_Validate::check($no_url, $context), 'missing_env_url'), 'a target environment needs a URL');
+
+$invalid_role = fsync_test_config(array('environments' => array('staging' => array('role' => 'banana'))));
+T::ok(fsync_has_issue(Fsync_Config_Validate::check($invalid_role, $context), 'schema_enum'), 'an unknown environment role is rejected');
+
+$malformed_url = fsync_test_config(
+    array('environments' => array('staging' => array('role' => 'target', 'url' => 'https://not a url', 'credential' => 'peer-stg')))
+);
+T::ok(fsync_has_issue(Fsync_Config_Validate::check($malformed_url, $context), 'schema_uri'), 'a malformed HTTPS URL is rejected');
+
+$uppercase_url = fsync_test_config(
+    array('environments' => array('staging' => array('role' => 'target', 'url' => 'HTTPS://STG.EXAMPLE.JP:443/', 'credential' => 'peer-stg')))
+);
+T::ok(Fsync_Config_Validate::check($uppercase_url, $context)['ok'], 'an equivalent uppercase HTTPS URL is accepted');
+
+$invalid_env_ip = fsync_test_config(
+    array(
+        'environments' => array(
+            'staging' => array(
+                'role' => 'target',
+                'url' => 'https://stg.example.jp/',
+                'credential' => 'peer-stg',
+                'ip_allowlist' => array('10.0.0.0/99'),
+            ),
+        ),
+    )
+);
+T::ok(
+    fsync_has_issue(Fsync_Config_Validate::check($invalid_env_ip, $context), 'invalid_ip_allowlist'),
+    'a malformed environment IP allowlist is rejected'
+);
 
 // The source environment is where releases are authored and nothing connects
 // to it, so it legitimately has neither URL nor credential.
@@ -368,6 +539,38 @@ $auto = fsync_test_config(
 );
 T::ok(fsync_has_issue(Fsync_Config_Validate::check($auto, $context), 'unattended_apply'), 'unattended apply warns');
 
+$slack_without_credential = fsync_test_config(
+    array('notify' => array('ops' => array('type' => 'slack', 'events' => array('failed'))))
+);
+T::ok(
+    fsync_has_issue(Fsync_Config_Validate::check($slack_without_credential, $context), 'missing_notification_credential'),
+    'Slack notification without a stored credential is rejected'
+);
+
+$unsafe_webhook = fsync_test_config(
+    array(
+        'notify' => array(
+            'ops' => array(
+                'type' => 'webhook',
+                'url' => 'https://notify.example.jp/hook?token=secret',
+                'credential' => 'webhook-ops',
+            ),
+        ),
+    )
+);
+T::ok(
+    fsync_has_issue(Fsync_Config_Validate::check($unsafe_webhook, array('credentials' => array_merge($context['credentials'], array('webhook-ops')))), 'invalid_notification_url'),
+    'a webhook URL containing a query secret is rejected'
+);
+
+$unknown_storage_setting = fsync_test_config(
+    array('storage' => array('archive' => array('type' => 'local', 'bukcet' => 'typo')))
+);
+T::ok(
+    fsync_has_issue(Fsync_Config_Validate::check($unknown_storage_setting, $context), 'schema_unknown_property'),
+    'an unknown storage setting is rejected'
+);
+
 T::group('Fsync_Config_Validate credentials');
 
 $result = Fsync_Config_Validate::check(fsync_test_config(), array('credentials' => array('peer-stg')));
@@ -378,3 +581,14 @@ T::group('Fsync_Config_Validate::escape_pointer');
 
 T::same('a~1b', Fsync_Config_Validate::escape_pointer('a/b'), 'slashes are escaped as ~1');
 T::same('a~0b', Fsync_Config_Validate::escape_pointer('a~b'), 'tildes are escaped as ~0');
+
+T::group('Fsync_Config_Io explicit file failure');
+
+$missing_explicit_config = sys_get_temp_dir() . '/fsync-config-that-does-not-exist.jsonc';
+@unlink($missing_explicit_config);
+define('FSYNC_CONFIG_FILE', $missing_explicit_config);
+Fsync_Config_Io::flush();
+$explicit_load = Fsync_Config_Io::load();
+T::same(Fsync_Config_Io::SOURCE_FILE, $explicit_load['source'], 'an explicit missing file remains authoritative');
+T::same($missing_explicit_config, $explicit_load['path'], 'the explicit missing path is reported');
+T::is_error($explicit_load['error'], 'fsync_config_unreadable', 'an explicit missing file fails closed');

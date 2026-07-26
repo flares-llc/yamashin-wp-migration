@@ -13,9 +13,8 @@ if (! defined('ABSPATH')) {
  * That difference is what stops an agent from confidently writing a
  * configuration for a post type this site has never registered.
  *
- * A static copy is shipped at schema/config.schema.json for editors that follow
- * the $schema reference in a repository, but the generated version is the one
- * validation and authoring should use.
+ * The generated schema is the authoring contract; there is deliberately no
+ * static copy that could accept names not registered on this site.
  */
 final class Fsync_Config_Schema
 {
@@ -39,7 +38,7 @@ final class Fsync_Config_Schema
         return array(
             '$schema' => 'http://json-schema.org/draft-07/schema#',
             '$id' => rest_url(FSYNC_REST_NAMESPACE . '/config/schema'),
-            'title' => 'Flares Sync 設定',
+            'title' => 'Yamashin WP Migration 設定',
             'description' => sprintf(
                 '%s 用に生成されたスキーマです。投稿タイプなどの候補はこのサイトの実際の登録内容から生成されています。',
                 home_url('/')
@@ -59,6 +58,7 @@ final class Fsync_Config_Schema
                 'environment_overrides' => array(
                     'type' => 'object',
                     'description' => '環境名ごとに、この文書全体へ適用する上書き。接続先・保存先・スケジュールなど環境固有の値に使います。',
+                    'propertyNames' => array('pattern' => Fsync_Peer::ENV_NAME_PATTERN),
                     'additionalProperties' => array('type' => 'object'),
                 ),
                 'backup' => self::backup_schema(),
@@ -161,6 +161,7 @@ final class Fsync_Config_Schema
                             'items' => array(
                                 'type' => 'object',
                                 'required' => array('name', 'primary_key'),
+                                'additionalProperties' => false,
                                 'properties' => array(
                                     'name' => self::names_of($tables),
                                     'primary_key' => array('type' => 'string'),
@@ -203,6 +204,8 @@ final class Fsync_Config_Schema
                                     array('type' => 'string', 'enum' => array('post', 'term', 'user')),
                                     array(
                                         'type' => 'object',
+                                        'required' => array('kind'),
+                                        'additionalProperties' => false,
                                         'properties' => array(
                                             'kind' => array('type' => 'string', 'enum' => array('post', 'term', 'user')),
                                             'shape' => array(
@@ -230,6 +233,7 @@ final class Fsync_Config_Schema
                 'scope_overrides' => array(
                     'type' => 'object',
                     'description' => '環境ごとのスコープ差分。scope_fingerprint は相手環境ごとに別々に計算されます。',
+                    'propertyNames' => array('pattern' => Fsync_Peer::ENV_NAME_PATTERN),
                     'additionalProperties' => array('type' => 'object'),
                 ),
                 'policy' => array(
@@ -257,7 +261,7 @@ final class Fsync_Config_Schema
     {
         return array(
             'type' => 'object',
-            'propertyNames' => array('pattern' => '^[a-z0-9][a-z0-9_-]{0,63}$'),
+            'propertyNames' => array('pattern' => Fsync_Peer::ENV_NAME_PATTERN),
             'additionalProperties' => array(
                 'type' => 'object',
                 'additionalProperties' => false,
@@ -335,6 +339,7 @@ final class Fsync_Config_Schema
             'additionalProperties' => array(
                 'type' => 'object',
                 'required' => array('type'),
+                'additionalProperties' => false,
                 'properties' => array(
                     'type' => array('type' => 'string', 'enum' => array('local', 'gcs', 'gdrive')),
                     'bucket' => array('type' => 'string'),
@@ -400,6 +405,7 @@ final class Fsync_Config_Schema
             'additionalProperties' => array(
                 'type' => 'object',
                 'required' => array('type'),
+                'additionalProperties' => false,
                 'properties' => array(
                     'type' => array('type' => 'string', 'enum' => array('email', 'slack', 'webhook')),
                     'to' => array('type' => 'string'),

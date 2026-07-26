@@ -1,12 +1,15 @@
 <?php
 /**
- * Plugin Name: Flares Sync
+ * Plugin Name: Yamashin WP Migration
  * Plugin URI: https://github.com/flares-llc/yamashin-wp-migration
- * Description: ローカル・ステージング・本番の間で、必要な差分だけを検知して同期します。ドリフト検知、ドライラン、リリース昇格、分類別バックアップに対応します。
+ * Description: WordPress 環境間の安全な差分移行に向けた接続・HMAC 認証・設定検証・診断基盤を提供します。
  * Version: 0.1.0
  * Requires at least: 6.0
  * Requires PHP: 8.0
- * Author: Flares
+ * Author: 山真研究室
+ * Author URI: https://shinroh.com/
+ * License: GPL-2.0-or-later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: flares-sync
  */
 
@@ -73,6 +76,11 @@ require_once FSYNC_DIR . 'includes/class-fsync-rest-keys.php';
  */
 function fsync_boot()
 {
+    // The directory may disappear after activation through a deploy, volume
+    // replacement or manual cleanup. Re-checking is cheap and makes the next
+    // request restore both the private tree and its web-access guards.
+    Fsync_Fs::ensure_private_storage();
+
     Fsync_Schema::register_hooks();
     Fsync_Rest::register_hooks();
 

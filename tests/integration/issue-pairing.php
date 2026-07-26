@@ -2,7 +2,7 @@
 /**
  * Issue a pairing blob on the receiving site.
  *
- *   wp eval-file .../issue-pairing.php <env_name> <connect_url> <preset>
+ *   wp eval-file .../issue-pairing.php <env_name> <connect_url> <preset> [ip_allowlist]
  *
  * Prints the blob on the last line so a shell driver can capture it.
  */
@@ -14,6 +14,9 @@ if (! defined('WP_CLI') || ! WP_CLI) {
 $env_name = $args[0] ?? 'local';
 $connect_url = $args[1] ?? '';
 $preset = $args[2] ?? 'deploy';
+$ip_allowlist = array_values(
+    array_filter(array_map('trim', explode(',', (string) ($args[3] ?? ''))))
+);
 
 // Receiving has to be switched on deliberately; the harness does that during
 // setup, but assert it here so a failure names the real cause.
@@ -26,6 +29,7 @@ $result = Fsync_Pairing::create(
         'env_name' => $env_name,
         'label' => $env_name,
         'capabilities' => Fsync_Keys::PRESETS[$preset] ?? Fsync_Keys::PRESETS['readonly'],
+        'ip_allowlist' => $ip_allowlist,
         'connect_url' => $connect_url,
     )
 );

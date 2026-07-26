@@ -47,7 +47,7 @@ final class Fsync_Rest_Config
                 'callback' => [self::class, 'introspect'],
                 'permission_callback' => Fsync_Rest::admin_or_capability('read'),
                 'args' => array(
-                    'include_meta_keys' => array('type' => 'boolean', 'default' => true),
+                    'include_meta_keys' => array('type' => 'boolean', 'default' => false),
                     'include_options' => array('type' => 'boolean', 'default' => true),
                     'include_users' => array('type' => 'boolean', 'default' => true),
                 ),
@@ -70,7 +70,7 @@ final class Fsync_Rest_Config
             array(
                 'methods' => WP_REST_Server::CREATABLE,
                 'callback' => [self::class, 'apply'],
-                'permission_callback' => Fsync_Rest::admin_or_capability('admin'),
+                'permission_callback' => Fsync_Rest::admin_or_capability('write'),
             )
         );
 

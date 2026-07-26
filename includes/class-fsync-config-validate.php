@@ -56,14 +56,10 @@ final class Fsync_Config_Validate
      */
     public static function check(array $document, array $context = array())
     {
-        $issues = array();
+        $issues = self::collect_document_issues($document, $context);
 
-        self::check_secrets($document, '', $issues);
-        self::check_structure($document, $issues);
-        self::check_scope($document, $context, $issues);
-        self::check_environments($document, $issues);
-        self::check_storage_and_schedules($document, $issues);
-        self::check_credentials($document, $context, $issues);
+        self::check_scope_overrides($document, $context, $issues);
+        self::check_environment_overrides($document, $context, $issues);
 
         $errors = array_values(
             array_filter(
@@ -88,6 +84,350 @@ final class Fsync_Config_Validate
             'errors' => $errors,
             'warnings' => $warnings,
         );
+    }
+
+    /**
+     * Validate one effective document without recursively expanding overrides.
+     *
+     * @param array $document
+     * @param array $context
+     * @return array
+     */
+    private static function collect_document_issues(array $document, array $context)
+    {
+        $issues = array();
+
+        self::check_secrets($document, '', $issues);
+        self::check_schema($document, $context, $issues);
+        self::check_structure($document, $issues);
+        self::check_scope($document, $context, $issues);
+        self::check_environments($document, $issues);
+        self::check_storage_and_schedules($document, $issues);
+        self::check_credentials($document, $context, $issues);
+
+        return $issues;
+    }
+
+    /**
+     * Apply the generated schema to the document used by the save path.
+     *
+     * @param array $document
+     * @param array $context
+     * @param array $issues
+     * @return void
+     */
+    private static function check_schema(array $document, array $context, array &$issues)
+    {
+        $introspect = (array) ($context['introspect'] ?? array());
+        $schema = Fsync_Config_Schema::generate($introspect);
+        self::validate_schema_node($document, $schema, '', $issues);
+    }
+
+    /**
+     * Minimal JSON Schema evaluator for the keywords emitted by
+     * Fsync_Config_Schema. Keeping it here ensures the schema shown to authors
+     * and the rules enforced by apply cannot drift apart.
+     *
+     * @param mixed $value
+     * @param array $schema
+     * @param string $pointer
+     * @param array $issues
+     * @return void
+     */
+    private static function validate_schema_node($value, array $schema, $pointer, array &$issues)
+    {
+        if (isset($schema['anyOf']) && is_array($schema['anyOf'])) {
+            foreach ($schema['anyOf'] as $candidate) {
+                $candidate_issues = array();
+                self::validate_schema_node($value, (array) $candidate, $pointer, $candidate_issues);
+                if ($candidate_issues === array()) {
+                    return;
+                }
+            }
+
+            $issues[] = self::issue(
+                self::SEVERITY_ERROR,
+                'schema_any_of',
+                $pointer,
+                '値が許可されているどの形式にも一致しません。'
+            );
+
+            return;
+        }
+
+        if (isset($schema['type'])) {
+            $types = is_array($schema['type']) ? $schema['type'] : array($schema['type']);
+            $matches = false;
+            foreach ($types as $type) {
+                if (self::schema_type_matches($value, (string) $type)) {
+                    $matches = true;
+                    break;
+                }
+            }
+
+            if (! $matches) {
+                $issues[] = self::issue(
+                    self::SEVERITY_ERROR,
+                    'schema_type',
+                    $pointer,
+                    sprintf('値の型が不正です。期待: %s', implode(' / ', $types))
+                );
+
+                return;
+            }
+        }
+
+        if (array_key_exists('const', $schema) && $value !== $schema['const']) {
+            $issues[] = self::issue(self::SEVERITY_ERROR, 'schema_const', $pointer, '許可されていない値です。');
+        }
+
+        if (isset($schema['enum']) && ! in_array($value, (array) $schema['enum'], true)) {
+            $issues[] = self::issue(
+                self::SEVERITY_ERROR,
+                'schema_enum',
+                $pointer,
+                sprintf('許可されている値は %s です。', implode(' / ', (array) $schema['enum']))
+            );
+        }
+
+        if (is_string($value)) {
+            if (isset($schema['pattern']) && @preg_match('#' . $schema['pattern'] . '#u', $value) !== 1) {
+                $issues[] = self::issue(self::SEVERITY_ERROR, 'schema_pattern', $pointer, '文字列の形式が不正です。');
+            }
+            if (($schema['format'] ?? '') === 'uri' && filter_var($value, FILTER_VALIDATE_URL) === false) {
+                $issues[] = self::issue(self::SEVERITY_ERROR, 'schema_uri', $pointer, 'URLの形式が不正です。');
+            }
+        }
+
+        if (is_int($value) && isset($schema['minimum']) && $value < (int) $schema['minimum']) {
+            $issues[] = self::issue(
+                self::SEVERITY_ERROR,
+                'schema_minimum',
+                $pointer,
+                sprintf('%d以上を指定してください。', (int) $schema['minimum'])
+            );
+        }
+
+        if (! is_array($value)) {
+            return;
+        }
+
+        $is_list = Fsync_Utils::is_list($value);
+        if (isset($schema['items']) && ($value === array() || $is_list)) {
+            foreach ($value as $index => $item) {
+                self::validate_schema_node(
+                    $item,
+                    (array) $schema['items'],
+                    $pointer . '/' . (int) $index,
+                    $issues
+                );
+            }
+
+            return;
+        }
+
+        if ($value !== array() && $is_list) {
+            return;
+        }
+
+        foreach ((array) ($schema['required'] ?? array()) as $required) {
+            if (! array_key_exists($required, $value)) {
+                $issues[] = self::issue(
+                    self::SEVERITY_ERROR,
+                    'schema_required',
+                    $pointer . '/' . self::escape_pointer((string) $required),
+                    sprintf('必須項目「%s」がありません。', (string) $required)
+                );
+            }
+        }
+
+        $properties = (array) ($schema['properties'] ?? array());
+        foreach ($value as $key => $item) {
+            $child = $pointer . '/' . self::escape_pointer((string) $key);
+
+            if (isset($schema['propertyNames'])) {
+                self::validate_schema_node((string) $key, (array) $schema['propertyNames'], $child, $issues);
+            }
+
+            if (isset($properties[$key])) {
+                self::validate_schema_node($item, (array) $properties[$key], $child, $issues);
+                continue;
+            }
+
+            if (($schema['additionalProperties'] ?? null) === false) {
+                $issues[] = self::issue(
+                    self::SEVERITY_ERROR,
+                    'schema_unknown_property',
+                    $child,
+                    sprintf('未対応の設定項目です: %s', (string) $key)
+                );
+                continue;
+            }
+
+            if (is_array($schema['additionalProperties'] ?? null)) {
+                self::validate_schema_node($item, $schema['additionalProperties'], $child, $issues);
+            }
+        }
+    }
+
+    /**
+     * @param mixed $value
+     * @param string $type
+     * @return bool
+     */
+    private static function schema_type_matches($value, $type)
+    {
+        switch ($type) {
+            case 'object':
+                return is_array($value) && ($value === array() || ! Fsync_Utils::is_list($value));
+            case 'array':
+                return is_array($value) && ($value === array() || Fsync_Utils::is_list($value));
+            case 'string':
+                return is_string($value);
+            case 'integer':
+                return is_int($value);
+            case 'number':
+                return is_int($value) || is_float($value);
+            case 'boolean':
+                return is_bool($value);
+            case 'null':
+                return $value === null;
+        }
+
+        return true;
+    }
+
+    /**
+     * Validate each per-peer scope after its override has been merged.
+     *
+     * @param array $document
+     * @param array $context
+     * @param array $issues
+     * @return void
+     */
+    private static function check_scope_overrides(array $document, array $context, array &$issues)
+    {
+        $overrides = $document['sync']['scope_overrides'] ?? array();
+        if (! is_array($overrides)) {
+            return;
+        }
+
+        $base = $document;
+        $base['sync'] = is_array($base['sync'] ?? null) ? $base['sync'] : array();
+        $base['sync']['scope'] = is_array($base['sync']['scope'] ?? null) ? $base['sync']['scope'] : array();
+        $base['sync']['scope_overrides'] = array();
+        $base['environment_overrides'] = array();
+        $base_issues = self::collect_document_issues($base, $context);
+
+        foreach ($overrides as $env_name => $override) {
+            if (! is_array($override)) {
+                continue;
+            }
+
+            $effective = $base;
+            $effective['sync']['scope'] = Fsync_Config_Io::merge($base['sync']['scope'], $override);
+            $effective_issues = self::collect_document_issues($effective, $context);
+            $new_issues = self::issues_not_in($effective_issues, $base_issues);
+            $prefix = '/sync/scope_overrides/' . self::escape_pointer((string) $env_name);
+
+            foreach ($new_issues as $issue) {
+                if (strpos($issue['pointer'], '/sync/scope') !== 0) {
+                    continue;
+                }
+
+                $issue['pointer'] = $prefix . substr($issue['pointer'], strlen('/sync/scope'));
+                self::append_unique_issue($issues, $issue);
+            }
+        }
+    }
+
+    /**
+     * Validate the complete effective document produced by every environment
+     * overlay. This prevents an override from bypassing a rule that the base
+     * document itself obeys.
+     *
+     * @param array $document
+     * @param array $context
+     * @param array $issues
+     * @return void
+     */
+    private static function check_environment_overrides(array $document, array $context, array &$issues)
+    {
+        $overrides = $document['environment_overrides'] ?? array();
+        if (! is_array($overrides)) {
+            return;
+        }
+
+        $base = $document;
+        $base['environment_overrides'] = array();
+        $base_issues = self::collect_document_issues($base, $context);
+
+        foreach ($overrides as $env_name => $override) {
+            if (! is_array($override)) {
+                continue;
+            }
+
+            $effective = Fsync_Config_Io::merge($base, $override);
+            $effective['environment_overrides'] = array();
+            $effective_issues = self::collect_document_issues($effective, $context);
+            $new_issues = self::issues_not_in($effective_issues, $base_issues);
+            $prefix = '/environment_overrides/' . self::escape_pointer((string) $env_name);
+
+            foreach ($new_issues as $issue) {
+                $issue['pointer'] = $prefix . $issue['pointer'];
+                self::append_unique_issue($issues, $issue);
+            }
+        }
+    }
+
+    /**
+     * @param array $candidates
+     * @param array $baseline
+     * @return array
+     */
+    private static function issues_not_in(array $candidates, array $baseline)
+    {
+        $known = array();
+        foreach ($baseline as $issue) {
+            $known[self::issue_identity($issue)] = true;
+        }
+
+        return array_values(
+            array_filter(
+                $candidates,
+                static function ($issue) use ($known) {
+                    return ! isset($known[self::issue_identity($issue)]);
+                }
+            )
+        );
+    }
+
+    /**
+     * @param array $issues
+     * @param array $issue
+     * @return void
+     */
+    private static function append_unique_issue(array &$issues, array $issue)
+    {
+        $identity = self::issue_identity($issue);
+        foreach ($issues as $existing) {
+            if (self::issue_identity($existing) === $identity) {
+                return;
+            }
+        }
+
+        $issues[] = $issue;
+    }
+
+    /**
+     * @param array $issue
+     * @return string
+     */
+    private static function issue_identity(array $issue)
+    {
+        return (string) ($issue['severity'] ?? '') . "\0"
+            . (string) ($issue['code'] ?? '') . "\0"
+            . (string) ($issue['pointer'] ?? '');
     }
 
     /**
@@ -271,10 +611,22 @@ final class Fsync_Config_Validate
     {
         $allow = (array) ($document['sync']['scope']['options']['allow'] ?? array());
 
+        self::check_patterns($allow, '/sync/scope/options/allow', $issues);
+        self::check_patterns(
+            (array) ($document['sync']['policy']['protected_extra'] ?? array()),
+            '/sync/policy/protected_extra',
+            $issues
+        );
+
         foreach ($allow as $index => $name) {
             $pointer = '/sync/scope/options/allow/' . (int) $index;
 
-            if (Fsync_Config::is_protected_option((string) $name)) {
+            $protected = array_merge(
+                Fsync_Config::PROTECTED_OPTIONS,
+                (array) ($document['sync']['policy']['protected_extra'] ?? array())
+            );
+
+            if (Fsync_Config::matches_any((string) $name, $protected)) {
                 $issues[] = self::issue(
                     self::SEVERITY_ERROR,
                     'protected_option',
@@ -389,6 +741,39 @@ final class Fsync_Config_Validate
     }
 
     /**
+     * Validate entries that use the slash-delimited regular-expression form.
+     * Exact names are intentionally accepted unchanged.
+     *
+     * @param array<int, mixed> $patterns
+     * @param string $base_pointer
+     * @param array $issues
+     * @return void
+     */
+    private static function check_patterns(array $patterns, $base_pointer, array &$issues)
+    {
+        foreach ($patterns as $index => $pattern) {
+            if (! is_string($pattern)) {
+                continue;
+            }
+
+            if (strlen($pattern) <= 2 || $pattern[0] !== '/' || substr($pattern, -1) !== '/') {
+                continue;
+            }
+
+            if (@preg_match($pattern, '') !== false) {
+                continue;
+            }
+
+            $issues[] = self::issue(
+                self::SEVERITY_ERROR,
+                'invalid_pattern',
+                $base_pointer . '/' . (int) $index,
+                sprintf('「%s」は正しい正規表現ではありません。', $pattern)
+            );
+        }
+    }
+
+    /**
      * @param array $document
      * @param array $issues
      * @return void
@@ -436,13 +821,18 @@ final class Fsync_Config_Validate
                         $pointer . '/url',
                         'url は必須です（role が source の環境を除く）。'
                     );
-                } elseif (strpos($url, 'https://') !== 0 && ! Fsync_Pairing::is_local_url($url)) {
-                    $issues[] = self::issue(
-                        self::SEVERITY_ERROR,
-                        'insecure_env_url',
-                        $pointer . '/url',
-                        '接続先URLはHTTPSである必要があります。'
-                    );
+                } else {
+                    $normalized_url = Fsync_Pairing::normalize_url($url);
+                    if (is_wp_error($normalized_url)) {
+                        $issues[] = self::issue(
+                            self::SEVERITY_ERROR,
+                            $normalized_url->get_error_code() === 'fsync_pairing_insecure'
+                                ? 'insecure_env_url'
+                                : 'invalid_env_url',
+                            $pointer . '/url',
+                            $normalized_url->get_error_message()
+                        );
+                    }
                 }
 
                 if (empty($environment['credential'])) {
@@ -472,6 +862,17 @@ final class Fsync_Config_Validate
                             '環境が自分自身を参照しています。'
                         );
                     }
+                }
+            }
+
+            foreach ((array) ($environment['ip_allowlist'] ?? array()) as $index => $pattern) {
+                if (! Fsync_Keys::valid_ip_pattern((string) $pattern)) {
+                    $issues[] = self::issue(
+                        self::SEVERITY_ERROR,
+                        'invalid_ip_allowlist',
+                        $pointer . '/ip_allowlist/' . (int) $index,
+                        sprintf('IPアドレスまたはCIDRの形式が不正です: %s', (string) $pattern)
+                    );
                 }
             }
 
@@ -630,6 +1031,55 @@ final class Fsync_Config_Validate
                         'unknown_notifier',
                         $pointer . '/notify/' . (int) $n_index,
                         sprintf('通知先「%s」が notify に定義されていません。', (string) $notifier)
+                    );
+                }
+            }
+        }
+
+        foreach ((array) ($document['notify'] ?? array()) as $name => $notifier) {
+            if (! is_array($notifier)) {
+                continue;
+            }
+
+            $pointer = '/notify/' . self::escape_pointer((string) $name);
+            $type = (string) ($notifier['type'] ?? '');
+
+            if ($type === 'email' && trim((string) ($notifier['to'] ?? '')) === '') {
+                $issues[] = self::issue(
+                    self::SEVERITY_ERROR,
+                    'missing_notification_recipient',
+                    $pointer . '/to',
+                    'メール通知には送信先 to が必要です。'
+                );
+            }
+
+            if ($type === 'slack' && empty($notifier['credential'])) {
+                $issues[] = self::issue(
+                    self::SEVERITY_ERROR,
+                    'missing_notification_credential',
+                    $pointer . '/credential',
+                    'Slack通知にはWebhook URLを保存した credential が必要です。'
+                );
+            }
+
+            if ($type === 'webhook') {
+                if (empty($notifier['credential'])) {
+                    $issues[] = self::issue(
+                        self::SEVERITY_ERROR,
+                        'missing_notification_credential',
+                        $pointer . '/credential',
+                        'Webhook通知には署名シークレットを保存した credential が必要です。'
+                    );
+                }
+
+                $url = (string) ($notifier['url'] ?? '');
+                $normalized = $url === '' ? new WP_Error('missing') : Fsync_Pairing::normalize_url($url);
+                if ($url === '' || is_wp_error($normalized)) {
+                    $issues[] = self::issue(
+                        self::SEVERITY_ERROR,
+                        'invalid_notification_url',
+                        $pointer . '/url',
+                        'Webhook通知には認証情報やクエリを含まないHTTPSの url が必要です。'
                     );
                 }
             }

@@ -59,6 +59,7 @@ final class Fsync_Nonce_Store
             ),
             array('%s', '%s', '%d')
         );
+        $insert_error = (string) $wpdb->last_error;
         $wpdb->suppress_errors($suppressed);
 
         if ($inserted === false) {
@@ -68,14 +69,22 @@ final class Fsync_Nonce_Store
                 return new WP_Error(
                     'fsync_nonce_store_unavailable',
                     'リプレイ防止用のテーブルを利用できないため、リクエストを受け付けられません。',
-                    array('status' => 503)
+                    array('status' => 503, 'retryable' => true)
+                );
+            }
+
+            if (preg_match('/(?:duplicate\s+entry|\b1062\b)/i', $insert_error) === 1) {
+                return new WP_Error(
+                    'fsync_nonce_replayed',
+                    'このリクエストは既に処理済みです（リプレイの可能性）。',
+                    array('status' => 401)
                 );
             }
 
             return new WP_Error(
-                'fsync_nonce_replayed',
-                'このリクエストは既に処理済みです（リプレイの可能性）。',
-                array('status' => 401)
+                'fsync_nonce_store_failed',
+                'リプレイ防止情報を保存できないため、リクエストを受け付けられません。',
+                array('status' => 503, 'retryable' => true)
             );
         }
 

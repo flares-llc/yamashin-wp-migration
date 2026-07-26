@@ -136,6 +136,11 @@ function home_url($path = '')
     return 'http://example.test/' . ltrim((string) $path, '/');
 }
 
+function rest_url($path = '')
+{
+    return 'http://example.test/wp-json/' . ltrim((string) $path, '/');
+}
+
 function esc_url_raw($url)
 {
     $url = trim((string) $url);
@@ -193,6 +198,7 @@ define('FSYNC_SLUG', 'flares-sync');
 define('FSYNC_SCHEMA_VERSION', 1);
 define('FSYNC_HASH_ALGO_VERSION', 1);
 define('FSYNC_PROTOCOL', 'FSYNC1');
+define('FSYNC_REST_NAMESPACE', 'flares-sync/v1');
 
 require_once __DIR__ . '/../includes/class-fsync-utils.php';
 require_once __DIR__ . '/../includes/class-fsync-fs.php';
@@ -205,6 +211,7 @@ require_once __DIR__ . '/../includes/class-fsync-peer.php';
 require_once __DIR__ . '/../includes/class-fsync-pairing.php';
 require_once __DIR__ . '/../includes/class-fsync-config-io.php';
 require_once __DIR__ . '/../includes/class-fsync-config.php';
+require_once __DIR__ . '/../includes/class-fsync-config-schema.php';
 require_once __DIR__ . '/../includes/class-fsync-config-validate.php';
 
 // ---------------------------------------------------------------------------
