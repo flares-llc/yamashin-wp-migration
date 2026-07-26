@@ -57,6 +57,28 @@ final class Fsync_Keys
     {
         global $wpdb;
 
+        $capabilities = self::sanitize_capabilities($args['capabilities'] ?? self::PRESETS['readonly']);
+        $ip_allowlist = self::sanitize_ips($args['ip_allowlist'] ?? array());
+
+        foreach ($ip_allowlist as $pattern) {
+            if (! self::valid_ip_pattern($pattern)) {
+                return new WP_Error(
+                    'fsync_ip_allowlist_invalid',
+                    sprintf('接続元IPの指定が不正です: %s', $pattern)
+                );
+            }
+        }
+
+        $direction = (string) ($args['direction'] ?? self::DIRECTION_INBOUND);
+        if (! in_array($direction, array(self::DIRECTION_INBOUND, self::DIRECTION_OUTBOUND), true)) {
+            return new WP_Error('fsync_key_direction_invalid', '接続キーの方向が不正です。');
+        }
+
+        $status = (string) ($args['status'] ?? self::STATUS_PENDING);
+        if (! in_array($status, array(self::STATUS_PENDING, self::STATUS_ACTIVE, self::STATUS_RETIRED), true)) {
+            return new WP_Error('fsync_key_status_invalid', '接続キーの状態が不正です。');
+        }
+
         $key_id = Fsync_Utils::random_hex(8);
         if (is_wp_error($key_id)) {
             return $key_id;
@@ -73,10 +95,8 @@ final class Fsync_Keys
             return $ciphertext;
         }
 
-        $capabilities = self::sanitize_capabilities($args['capabilities'] ?? self::PRESETS['readonly']);
-
         $encoded_caps = Fsync_Utils::encode($capabilities);
-        $encoded_ips = Fsync_Utils::encode(self::sanitize_ips($args['ip_allowlist'] ?? array()));
+        $encoded_ips = Fsync_Utils::encode($ip_allowlist);
         if (is_wp_error($encoded_caps) || is_wp_error($encoded_ips)) {
             return new WP_Error('fsync_key_encode_failed', 'キー情報を保存できません。');
         }
@@ -86,13 +106,13 @@ final class Fsync_Keys
             array(
                 'key_id' => $key_id,
                 'peer_id' => (string) ($args['peer_id'] ?? ''),
-                'direction' => (string) ($args['direction'] ?? self::DIRECTION_INBOUND),
+                'direction' => $direction,
                 'label' => substr((string) ($args['label'] ?? ''), 0, 191),
                 'secret_ciphertext' => $ciphertext,
                 'algorithm' => Fsync_Signer_Hmac::ALGORITHM,
                 'capabilities' => $encoded_caps,
                 'ip_allowlist' => $encoded_ips,
-                'status' => (string) ($args['status'] ?? self::STATUS_PENDING),
+                'status' => $status,
                 'supersedes' => (string) ($args['supersedes'] ?? ''),
                 'grace_until' => 0,
                 'expires_at' => (int) ($args['expires_at'] ?? 0),
@@ -229,6 +249,31 @@ final class Fsync_Keys
         if ($existing === null) {
             return new WP_Error('fsync_key_missing', '接続キーが見つかりません。');
         }
+        if ($existing['status'] !== self::STATUS_ACTIVE) {
+            return new WP_Error('fsync_key_not_active', '有効な接続キーだけをローテーションできます。');
+        }
+
+        if ($existing['grace_until'] > 0) {
+            return new WP_Error(
+                'fsync_key_rotation_pending',
+                'この接続キーは既にローテーション中です。新しいキーを有効化してください。'
+            );
+        }
+
+        $table = Fsync_Schema::table('keys');
+        $pending_replacement = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT key_id FROM {$table} WHERE supersedes = %s AND status = %s LIMIT 1",
+                $existing['key_id'],
+                self::STATUS_PENDING
+            )
+        );
+        if ($pending_replacement !== null) {
+            return new WP_Error(
+                'fsync_key_rotation_pending',
+                'この接続キーには有効化待ちの新しいキーがあります。'
+            );
+        }
 
         $issued = self::issue(
             array(
@@ -246,11 +291,23 @@ final class Fsync_Keys
             return $issued;
         }
 
-        $wpdb->update(
-            Fsync_Schema::table('keys'),
+        $updated = $wpdb->update(
+            $table,
             array('grace_until' => Fsync_Utils::now() + self::ROTATION_GRACE),
-            array('key_id' => $existing['key_id'])
+            array(
+                'key_id' => $existing['key_id'],
+                'status' => self::STATUS_ACTIVE,
+                'grace_until' => 0,
+            )
         );
+
+        if ($updated !== 1) {
+            // The replacement secret has not been returned yet, so removing
+            // the unusable row is safer than leaving an unexplained pending key.
+            $wpdb->delete($table, array('key_id' => $issued['key_id']));
+
+            return new WP_Error('fsync_key_rotation_failed', '接続キーをローテーションできませんでした。');
+        }
 
         Fsync_Log::warning(
             'key_rotated',
@@ -265,17 +322,34 @@ final class Fsync_Keys
      * Revoke a key immediately.
      *
      * @param string $key_id
-     * @return true
+     * @return true|WP_Error
      */
     public static function retire($key_id)
     {
         global $wpdb;
 
-        $wpdb->update(
+        $existing = self::find($key_id);
+        if ($existing === null) {
+            return new WP_Error(
+                'fsync_key_missing',
+                '接続キーが見つかりません。',
+                array('status' => 404)
+            );
+        }
+
+        if ($existing['status'] === self::STATUS_RETIRED && $existing['grace_until'] === 0) {
+            return true;
+        }
+
+        $updated = $wpdb->update(
             Fsync_Schema::table('keys'),
             array('status' => self::STATUS_RETIRED, 'grace_until' => 0),
             array('key_id' => (string) $key_id)
         );
+
+        if ($updated === false) {
+            return new WP_Error('fsync_key_retire_failed', '接続キーを失効できませんでした。');
+        }
 
         Fsync_Log::warning(
             'key_retired',
@@ -284,6 +358,49 @@ final class Fsync_Keys
         );
 
         return true;
+    }
+
+    /**
+     * Retire older inbound keys after the same peer completes a fresh pairing.
+     *
+     * @param string $peer_id
+     * @param string $except_key_id
+     * @return int|WP_Error Number of keys retired.
+     */
+    public static function retire_other_inbound($peer_id, $except_key_id)
+    {
+        global $wpdb;
+
+        $table = Fsync_Schema::table('keys');
+        $updated = $wpdb->query(
+            $wpdb->prepare(
+                "UPDATE {$table}
+                 SET status = %s, grace_until = 0
+                 WHERE peer_id = %s
+                   AND key_id <> %s
+                   AND direction = %s
+                   AND status <> %s",
+                self::STATUS_RETIRED,
+                (string) $peer_id,
+                (string) $except_key_id,
+                self::DIRECTION_INBOUND,
+                self::STATUS_RETIRED
+            )
+        );
+
+        if ($updated === false) {
+            return new WP_Error('fsync_key_retire_failed', '以前の接続キーを失効できませんでした。');
+        }
+
+        if ($updated > 0) {
+            Fsync_Log::warning(
+                'peer_keys_retired',
+                sprintf('再ペアリングにより以前の接続キーを%d件失効しました。', $updated),
+                array('key_id' => (string) $except_key_id, 'peer_id' => (string) $peer_id)
+            );
+        }
+
+        return (int) $updated;
     }
 
     /**
@@ -393,6 +510,40 @@ final class Fsync_Keys
         }
 
         return array_values(array_unique($out));
+    }
+
+    /**
+     * Validate an IP literal or CIDR range before it is persisted on a key.
+     *
+     * @param string $pattern
+     * @return bool
+     */
+    public static function valid_ip_pattern($pattern)
+    {
+        $pattern = trim((string) $pattern);
+        if ($pattern === '') {
+            return false;
+        }
+
+        if (strpos($pattern, '/') === false) {
+            return filter_var($pattern, FILTER_VALIDATE_IP) !== false;
+        }
+
+        if (substr_count($pattern, '/') !== 1) {
+            return false;
+        }
+
+        list($subnet, $bits) = explode('/', $pattern, 2);
+        if (filter_var($subnet, FILTER_VALIDATE_IP) === false || preg_match('/^[0-9]+$/', $bits) !== 1) {
+            return false;
+        }
+
+        $packed = @inet_pton($subnet);
+        if ($packed === false) {
+            return false;
+        }
+
+        return (int) $bits <= strlen($packed) * 8;
     }
 
     /**

@@ -28,7 +28,10 @@ final class Fsync_Introspect
     {
         $args = array_merge(
             array(
-                'include_meta_keys' => true,
+                // Meta-key aggregation scans the full postmeta table. Keep it
+                // opt-in so a discovery request cannot unexpectedly time out
+                // on a large production site.
+                'include_meta_keys' => false,
                 'include_options' => true,
                 'include_users' => true,
             ),

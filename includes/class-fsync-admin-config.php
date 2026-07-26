@@ -40,7 +40,7 @@ final class Fsync_Admin_Config
         $file_backed = Fsync_Config_Io::is_file_backed();
 
         print '<div class="wrap fsync">';
-        print '<h1>Flares Sync — 設定</h1>';
+        print '<h1>Yamashin WP Migration — 設定</h1>';
 
         Fsync_Admin::render_notice();
 
@@ -123,15 +123,16 @@ final class Fsync_Admin_Config
 
         foreach (
             array(
-                'config/introspect' => 'このサイトの投稿タイプ・メタキーの統計・オプション一覧などを返します。設定を書く材料です。',
-                'config/schema' => 'このサイト専用の JSON Schema。実在する投稿タイプだけが候補に入るので、存在しない名前を書けません。',
-                'config/validate' => '検証結果を JSON Pointer 付きで返します。修正箇所が機械的に分かります。',
-            ) as $route => $description
+                array('GET', 'config/introspect', 'このサイトの投稿タイプ・オプション一覧などを返します。メタキー統計は必要な場合だけ include_meta_keys=true で取得します。'),
+                array('GET', 'config/schema', 'このサイト専用の JSON Schema。実在する投稿タイプだけが候補に入るので、存在しない名前を書けません。'),
+                array('POST', 'config/validate', '検証結果を JSON Pointer 付きで返します。修正箇所が機械的に分かります。'),
+            ) as $endpoint
         ) {
             printf(
-                '<tr><td style="width:30em"><code>GET %s</code></td><td>%s</td></tr>',
-                esc_html(rest_url(FSYNC_REST_NAMESPACE . '/' . $route)),
-                esc_html($description)
+                '<tr><td style="width:30em"><code>%s %s</code></td><td>%s</td></tr>',
+                esc_html($endpoint[0]),
+                esc_html(rest_url(FSYNC_REST_NAMESPACE . '/' . $endpoint[1])),
+                esc_html($endpoint[2])
             );
         }
 
@@ -237,8 +238,8 @@ final class Fsync_Admin_Config
 
         if ($draft === false) {
             $document = $loaded['document'] === array() ? Fsync_Config::defaults() : $loaded['document'];
-            $encoded = Fsync_Utils::encode($document);
-            $draft = is_wp_error($encoded) ? '{}' : wp_json_encode($document, JSON_PRETTY_PRINT | Fsync_Utils::JSON_FLAGS);
+            $encoded = Fsync_Config_Io::pretty($document);
+            $draft = is_wp_error($encoded) ? '{}' : $encoded;
         }
 
         print '<h2>設定 JSON</h2>';
@@ -379,11 +380,12 @@ final class Fsync_Admin_Config
         $document['sync']['scope']['options']['allow'] = array_values(array_unique($options));
         $document['sync']['scope']['files']['theme'] = array_values(array_unique($themes));
 
-        set_transient(
-            self::DRAFT_TRANSIENT . get_current_user_id(),
-            wp_json_encode($document, JSON_PRETTY_PRINT | Fsync_Utils::JSON_FLAGS),
-            600
-        );
+        $encoded = Fsync_Config_Io::pretty($document);
+        if (is_wp_error($encoded)) {
+            return $encoded;
+        }
+
+        set_transient(self::DRAFT_TRANSIENT . get_current_user_id(), $encoded, 600);
 
         return 'JSON を生成しました。内容を確認して適用してください。';
     }

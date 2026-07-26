@@ -26,6 +26,10 @@ final class Fsync_Env
      */
     const MAX_ASSUMED_EXECUTION_TIME = 120;
 
+    /** Cache an advisory-lock capability probe across requests. */
+    const TRANSIENT_GET_LOCK = 'fsync_supports_get_lock';
+    const GET_LOCK_CACHE_TTL = HOUR_IN_SECONDS;
+
     /** @var array|null */
     private static $cache = null;
 
@@ -232,17 +236,30 @@ final class Fsync_Env
     {
         global $wpdb;
 
+        $cached = get_transient(self::TRANSIENT_GET_LOCK);
+        if ($cached === 'yes') {
+            return true;
+        }
+        if ($cached === 'no') {
+            return false;
+        }
+
         $name = 'fsync_probe_' . substr(md5((string) $wpdb->prefix), 0, 8);
 
         $acquired = $wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s, 0)', $name));
         if ((int) $acquired !== 1) {
+            set_transient(self::TRANSIENT_GET_LOCK, 'no', self::GET_LOCK_CACHE_TTL);
+
             return false;
         }
 
         $held = $wpdb->get_var($wpdb->prepare('SELECT IS_USED_LOCK(%s)', $name));
         $wpdb->query($wpdb->prepare('SELECT RELEASE_LOCK(%s)', $name));
 
-        return $held !== null;
+        $supported = $held !== null;
+        set_transient(self::TRANSIENT_GET_LOCK, $supported ? 'yes' : 'no', self::GET_LOCK_CACHE_TTL);
+
+        return $supported;
     }
 
     /**

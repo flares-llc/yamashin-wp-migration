@@ -36,7 +36,7 @@ final class Fsync_Admin_Connection
         $blob = get_transient('fsync_pairing_blob_' . get_current_user_id());
 
         print '<div class="wrap fsync">';
-        print '<h1>Flares Sync — 接続</h1>';
+        print '<h1>Yamashin WP Migration — 接続</h1>';
 
         Fsync_Admin::render_notice();
 
@@ -451,9 +451,14 @@ final class Fsync_Admin_Connection
      */
     public static function handle_retire_key()
     {
-        Fsync_Keys::retire((string) wp_unslash($_POST['key_id'] ?? ''));
+        $key_id = (string) wp_unslash($_POST['key_id'] ?? '');
+        if (Fsync_Keys::find($key_id) === null) {
+            return new WP_Error('fsync_key_missing', '接続キーが見つかりません。');
+        }
 
-        return '接続キーを失効しました。';
+        $retired = Fsync_Keys::retire($key_id);
+
+        return is_wp_error($retired) ? $retired : '接続キーを失効しました。';
     }
 
     /**
@@ -487,12 +492,17 @@ final class Fsync_Admin_Connection
             return new WP_Error('fsync_peer_missing', 'ピアが見つかりません。');
         }
 
+        $url = Fsync_Pairing::normalize_url(wp_unslash($_POST['url'] ?? ''));
+        if (is_wp_error($url)) {
+            return $url;
+        }
+
         $updated = Fsync_Peer::upsert(
             array(
                 'peer_id' => $peer['peer_id'],
                 'env_name' => $peer['env_name'],
                 'site_role' => $peer['site_role'],
-                'url' => wp_unslash($_POST['url'] ?? ''),
+                'url' => $url,
                 'outbound_key_id' => $peer['outbound_key_id'],
             )
         );
@@ -509,9 +519,26 @@ final class Fsync_Admin_Connection
      */
     public static function handle_forget_peer()
     {
-        Fsync_Peer::forget((string) wp_unslash($_POST['peer_id'] ?? ''));
+        $peer = Fsync_Peer::find((string) wp_unslash($_POST['peer_id'] ?? ''));
+        if ($peer === null) {
+            return new WP_Error('fsync_peer_missing', 'ピアが見つかりません。');
+        }
 
-        return 'ピアを削除しました。';
+        $forgotten = Fsync_Peer::forget($peer['peer_id']);
+        if (is_wp_error($forgotten)) {
+            return $forgotten;
+        }
+
+        $credential_id = 'peer-' . $peer['env_name'];
+        $credential = Fsync_Credentials::meta($credential_id);
+        if (is_array($credential) && $credential['kind'] === 'peer') {
+            $cleared = Fsync_Credentials::clear($credential_id);
+            if (is_wp_error($cleared)) {
+                return $cleared;
+            }
+        }
+
+        return 'ピアと接続用の認証情報を削除しました。';
     }
 
     /**
@@ -533,9 +560,9 @@ final class Fsync_Admin_Connection
      */
     public static function handle_clear_credential()
     {
-        Fsync_Credentials::clear((string) wp_unslash($_POST['credential_id'] ?? ''));
+        $cleared = Fsync_Credentials::clear((string) wp_unslash($_POST['credential_id'] ?? ''));
 
-        return '認証情報を削除しました。';
+        return is_wp_error($cleared) ? $cleared : '認証情報を削除しました。';
     }
 
     /**

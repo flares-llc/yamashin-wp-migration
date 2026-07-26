@@ -24,6 +24,47 @@ final class Fsync_Config_Io
     const SOURCE_DB = 'db';
     const SOURCE_DEFAULT = 'default';
 
+    /**
+     * Empty PHP arrays at these locations are JSON objects, not JSON lists.
+     * PHP loses that distinction after json_decode(..., true), so restore it
+     * when presenting an editable document that is expected to match the schema.
+     */
+    const JSON_OBJECT_PATHS = array(
+        '/',
+        '/sync',
+        '/sync/scope',
+        '/sync/scope/post_types',
+        '/sync/scope/taxonomies',
+        '/sync/scope/options',
+        '/sync/scope/files',
+        '/sync/scope/refs',
+        '/sync/scope/authors',
+        '/sync/scope/authors/map',
+        '/sync/scope_overrides',
+        '/sync/policy',
+        '/environments',
+        '/environment_overrides',
+        '/backup',
+        '/backup/retention',
+        '/storage',
+        '/notify',
+    );
+
+    /** Dynamic map entries whose empty values must also remain JSON objects. */
+    const JSON_OBJECT_PATH_PATTERNS = array(
+        '#^/sync/scope/post_types/[^/]+(?:/meta)?$#',
+        '#^/sync/scope/taxonomies/[^/]+(?:/meta)?$#',
+        '#^/sync/scope/refs/[^/]+$#',
+        '#^/sync/scope/tables/[0-9]+(?:/(?:refs|portable))?$#',
+        '#^/sync/scope_overrides/[^/]+(?:/(?:post_types|taxonomies|options|files|refs|authors))?$#',
+        '#^/sync/scope_overrides/[^/]+/(?:post_types|taxonomies)/[^/]+(?:/meta)?$#',
+        '#^/environments/[^/]+$#',
+        '#^/environment_overrides/[^/]+$#',
+        '#^/storage/[^/]+$#',
+        '#^/schedules/[0-9]+$#',
+        '#^/notify/[^/]+$#',
+    );
+
     /** Base filename looked for in each candidate directory. */
     const FILENAMES = array(
         'flares-sync.config.jsonc',
@@ -122,9 +163,11 @@ final class Fsync_Config_Io
     public static function locate()
     {
         if (defined('FSYNC_CONFIG_FILE')) {
-            $explicit = (string) constant('FSYNC_CONFIG_FILE');
-
-            return is_readable($explicit) ? $explicit : '';
+            // An explicitly configured path is authoritative even when it is
+            // missing or unreadable. Returning it lets load() fail closed and
+            // tell the operator which file is wrong instead of silently using
+            // an unrelated database copy.
+            return trim((string) constant('FSYNC_CONFIG_FILE'));
         }
 
         $directories = array(
@@ -136,7 +179,7 @@ final class Fsync_Config_Io
         foreach ($directories as $directory) {
             foreach (self::FILENAMES as $filename) {
                 $candidate = $directory . '/' . $filename;
-                if (is_readable($candidate)) {
+                if (file_exists($candidate)) {
                     return $candidate;
                 }
             }
@@ -180,11 +223,82 @@ final class Fsync_Config_Io
             );
         }
 
-        if (! is_array($decoded)) {
+        // json_decode(..., true) maps both JSON objects and arrays to PHP
+        // arrays. Inspect the JSON itself so a top-level list cannot masquerade
+        // as the configuration object the rest of the code expects.
+        $trimmed = ltrim($json);
+        if (! is_array($decoded) || $trimmed === '' || $trimmed[0] !== '{') {
             return new WP_Error('fsync_config_not_object', '設定はJSONオブジェクトである必要があります。');
         }
 
         return $decoded;
+    }
+
+    /**
+     * Encode a configuration for the editor without turning empty maps into [].
+     *
+     * @param array $document
+     * @return string|WP_Error
+     */
+    public static function pretty(array $document)
+    {
+        $encoded = json_encode(
+            self::restore_json_shapes($document, '/'),
+            JSON_PRETTY_PRINT | Fsync_Utils::JSON_FLAGS
+        );
+
+        if ($encoded === false) {
+            return new WP_Error(
+                'fsync_json_encode_failed',
+                sprintf('データをJSONに変換できません: %s', json_last_error_msg())
+            );
+        }
+
+        return $encoded;
+    }
+
+    /**
+     * @param mixed $node
+     * @param string $path
+     * @return mixed
+     */
+    private static function restore_json_shapes($node, $path)
+    {
+        if (! is_array($node)) {
+            return $node;
+        }
+
+        if ($node === array() && self::is_json_object_path($path)) {
+            return (object) array();
+        }
+
+        foreach ($node as $key => $value) {
+            $child = $path === '/'
+                ? '/' . (string) $key
+                : $path . '/' . (string) $key;
+            $node[$key] = self::restore_json_shapes($value, $child);
+        }
+
+        return $node;
+    }
+
+    /**
+     * @param string $path
+     * @return bool
+     */
+    private static function is_json_object_path($path)
+    {
+        if (in_array($path, self::JSON_OBJECT_PATHS, true)) {
+            return true;
+        }
+
+        foreach (self::JSON_OBJECT_PATH_PATTERNS as $pattern) {
+            if (preg_match($pattern, $path) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -249,6 +363,15 @@ final class Fsync_Config_Io
                     }
                     $i++;
                 }
+
+                if ($i + 1 >= $length) {
+                    // Leave an invalid token behind. Silently discarding an
+                    // unterminated comment could turn a truncated file into a
+                    // valid-looking document and apply it.
+                    $out .= '/*';
+                    break;
+                }
+
                 $i++;
 
                 continue;
@@ -329,10 +452,30 @@ final class Fsync_Config_Io
             );
         }
 
-        $previous = self::load()['document'];
-        self::record_history($previous, self::SOURCE_DB, $note);
+        $loaded = self::load();
+        $previous = $loaded['document'];
 
-        update_option(self::OPTION_DOCUMENT, $document, false);
+        // WordPress reports false both for failures and for no-op updates. A
+        // no-op needs neither a misleading history entry nor an error.
+        if ($previous === $document) {
+            return true;
+        }
+
+        $history_id = self::record_history($previous, $loaded['source'], $note);
+        if (is_wp_error($history_id)) {
+            return $history_id;
+        }
+
+        if (! update_option(self::OPTION_DOCUMENT, $document, false)) {
+            global $wpdb;
+
+            // The apply did not happen, so its rollback checkpoint must not be
+            // shown as a real configuration change.
+            $wpdb->delete(Fsync_Schema::table('config_history'), array('id' => $history_id));
+
+            return new WP_Error('fsync_config_write_failed', '設定をデータベースへ保存できませんでした。');
+        }
+
         self::flush();
 
         return true;
@@ -342,7 +485,7 @@ final class Fsync_Config_Io
      * @param array $document
      * @param string $source
      * @param string $note
-     * @return void
+     * @return int|WP_Error Inserted history id.
      */
     public static function record_history(array $document, $source, $note = '')
     {
@@ -350,22 +493,31 @@ final class Fsync_Config_Io
 
         $encoded = Fsync_Utils::encode($document);
         if (is_wp_error($encoded)) {
-            return;
+            return $encoded;
         }
 
         $hash = Fsync_Utils::canonical_hash($document);
+        if (is_wp_error($hash)) {
+            return $hash;
+        }
 
-        $wpdb->insert(
+        $inserted = $wpdb->insert(
             Fsync_Schema::table('config_history'),
             array(
                 'ts' => Fsync_Utils::now(),
                 'source' => (string) $source,
-                'config_hash' => is_wp_error($hash) ? '' : $hash,
+                'config_hash' => $hash,
                 'document' => $encoded,
                 'note' => substr((string) $note, 0, 255),
                 'user_id' => (int) get_current_user_id(),
             )
         );
+
+        if ($inserted === false) {
+            return new WP_Error('fsync_config_history_failed', '設定の変更履歴を保存できませんでした。');
+        }
+
+        return (int) $wpdb->insert_id;
     }
 
     /**

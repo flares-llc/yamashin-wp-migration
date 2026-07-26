@@ -51,6 +51,27 @@ T::same('staging', $parsed['env'] ?? '', 'environment name survives');
 T::same('abcdef0123456789', $parsed['key_id'] ?? '', 'key id survives');
 T::same(array('status', 'read', 'write'), $parsed['caps'] ?? array(), 'capabilities survive');
 
+$max_env = str_repeat('a', 59);
+T::same(
+    $max_env,
+    Fsync_Pairing::parse(fsync_test_blob(array('env' => $max_env)))['env'] ?? '',
+    'the longest environment name that fits its peer credential id is accepted'
+);
+T::is_error(
+    Fsync_Pairing::parse(fsync_test_blob(array('env' => str_repeat('a', 60)))),
+    'fsync_env_name_invalid',
+    'an environment name that cannot fit its peer credential id is rejected'
+);
+
+$canonical_url = Fsync_Pairing::parse(
+    fsync_test_blob(array('site' => 'HTTPS://STG.EXAMPLE.JP:443/api'))
+);
+T::same(
+    'https://stg.example.jp/api/',
+    is_wp_error($canonical_url) ? '' : $canonical_url['site'],
+    'scheme, hostname and default port are canonicalized'
+);
+
 // Copying through a chat client or email frequently inserts line breaks.
 $wrapped = wordwrap(fsync_test_blob(), 40, "\n", true);
 T::ok(! is_wp_error(Fsync_Pairing::parse($wrapped)), 'whitespace and line breaks are tolerated');
@@ -152,3 +173,21 @@ T::ok(
     ! is_wp_error(Fsync_Pairing::parse(fsync_test_blob(array('site' => 'http://localhost:8082/')))),
     'plain HTTP to localhost is accepted'
 );
+T::ok(
+    ! is_wp_error(Fsync_Pairing::parse(fsync_test_blob(array('site' => 'http://[::1]:8082/')))),
+    'plain HTTP to IPv6 localhost is accepted'
+);
+
+foreach (
+    array(
+        'https://user:secret@example.jp/',
+        'https://example.jp/?token=secret',
+        'https://example.jp/#fragment',
+    ) as $url
+) {
+    T::is_error(
+        Fsync_Pairing::parse(fsync_test_blob(array('site' => $url))),
+        'fsync_pairing_url',
+        sprintf('unsafe URL components are rejected: %s', $url)
+    );
+}

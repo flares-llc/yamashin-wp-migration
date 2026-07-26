@@ -74,18 +74,39 @@ final class Fsync_Fs
             );
         }
 
+        if (! is_writable($dir)) {
+            return new WP_Error(
+                'fsync_storage_not_writable',
+                sprintf('保存領域に書き込めません: %s', $dir)
+            );
+        }
+
         $htaccess = $dir . '/.htaccess';
         if (! file_exists($htaccess)) {
-            self::write_atomic($htaccess, "Require all denied\n<IfModule !mod_authz_core.c>\nDeny from all\n</IfModule>\n");
+            $written = self::write_atomic(
+                $htaccess,
+                "Require all denied\n<IfModule !mod_authz_core.c>\nDeny from all\n</IfModule>\n"
+            );
+            if (is_wp_error($written)) {
+                return $written;
+            }
         }
 
         $index = $dir . '/index.php';
         if (! file_exists($index)) {
-            self::write_atomic($index, "<?php\n// Silence is golden.\n");
+            $written = self::write_atomic($index, "<?php\n// Silence is golden.\n");
+            if (is_wp_error($written)) {
+                return $written;
+            }
         }
 
         foreach (array('objects', 'releases', 'backups', 'jobs', 'tmp', 'snapshots') as $child) {
-            wp_mkdir_p($dir . '/' . $child);
+            if (! wp_mkdir_p($dir . '/' . $child)) {
+                return new WP_Error(
+                    'fsync_storage_failed',
+                    sprintf('保存領域を作成できません: %s', $dir . '/' . $child)
+                );
+            }
         }
 
         return true;

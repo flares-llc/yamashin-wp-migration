@@ -1,6 +1,6 @@
-# Flares Sync — デバッグ引き継ぎ
+# Yamashin WP Migration — デバッグ引き継ぎ
 
-対象: `~/dev/flares-repos/yamashin-wp-migration`（WordPress プラグイン `flares-sync`）
+対象: このリポジトリ（WordPress プラグインの内部 slug は `flares-sync`）
 状態: フェーズ1（基盤・設定・認証）完了。差分エンジン本体は未実装。
 作成: 2026-07-26
 
@@ -11,20 +11,23 @@
 ## 1. 5分で動かす
 
 ```bash
-cd ~/dev/flares-repos/yamashin-wp-migration
+cd /path/to/yamashin-wp-migration
 
 # 静的テスト（WordPress 不要・約20秒）
 docker run --rm -v "$PWD":/app -w /app php:8.0-cli php tests/run.php
-# → OK: 264 assertions passed
+# → OK: 341 assertions passed
 
 # 3環境の WordPress を立てる
 docker compose up -d
 docker compose --profile setup run --rm setup
 
-# 実環境テスト（実 HTTP 往復・各26項目）
+# 実環境テスト（実 HTTP 往復・各61項目＋補助検証）
 ./docker/verify-pairing.sh staging
 ./docker/verify-pairing.sh production
-# → Success: 26 checks passed
+# → Success: 61 checks passed
+
+# アンインストール検証（指定した Docker サイトのプラグイン状態を一度消して再構築する）
+./docker/verify-uninstall.sh production
 ```
 
 | | URL | 役割 |
@@ -94,7 +97,7 @@ class-fsync-rest-status.php        /handshake /status /echo
 class-fsync-rest-config.php        /config/{schema,introspect,validate,apply,history}
 class-fsync-rest-keys.php          /pair/confirm /keys
 
-── 管理画面（未検証度が高い。§6 参照）
+── 管理画面（主要フォーム・通知・削除・診断をブラウザ検証済み。§5 参照）
 class-fsync-admin*.php             メニュー・接続・設定・診断
 
 ── テスト
@@ -134,61 +137,17 @@ FSYNC1
 
 ---
 
-## 4. 既知の不具合（優先度順・再現手順つき）
+## 4. 今回のデバッグで修正した主な不具合
 
-### 4.1 【高】ペアリング失敗時にゴミが残る
+2026-07-26 の複数巡回で、旧版の §4 に記録されていた既知不具合はすべて修正し、回帰テストを追加しました。
 
-`class-fsync-pairing.php:261 connect()` は `import()`（ローカル保存）→ `/pair/confirm`（ネットワーク）の順に実行します。import を先にコミットするのは「一時的な通信失敗で貼り付けた blob を失わせない」ためですが、**恒久的な失敗でもロールバックしません。**
+- **ペアリング:** 終端エラー時のピア・認証情報ロールバック、環境名衝突の拒否、URL の厳格化と正規化、IP 許可リストの確認時適用、再ペアリング後の旧受信キー失効
+- **認証・鍵:** nonce の重複と DB 障害の識別、IPv4/IPv6 CIDR の厳格化、信頼プロキシ経由のクライアント IP 判定、鍵発行・ローテーション・失効時の入力/DB エラー処理
+- **設定:** トップレベル配列と壊れた JSONC の拒否、ファイル設定の fail-closed、正規表現検証、生成 JSON Schema と実行時検証の一致、環境/スコープ上書き後の再検証、no-op 保存と履歴/ロールバックの整合性
+- **性能:** 重いメタキー集計を opt-in に変更、`GET_LOCK` 対応判定を transient にキャッシュ
+- **管理・運用:** ピア/認証情報削除失敗の伝播、保存領域の自己修復とガードファイル検証、アンインストール時のテーブル・オプション・transient・cron の除去
 
-再現:
-
-```bash
-./docker/verify-pairing.sh staging   # テスト内で失敗する再ペアリングを1回行う
-docker compose --profile tools run --rm -T wpcli_local wp eval '
-foreach (Fsync_Peer::all() as $p) echo $p["env_name"]."\n";
-foreach (Fsync_Credentials::all() as $c) echo $c["credential_id"]." ".$c["fingerprint"]."\n";' --allow-root
-```
-
-実際の結果:
-
-```
-production / production2 / staging / staging2      ← 2つは孤児
-peer-production a995d832 / peer-production2 a995d832  ← 同じ秘密が2つのIDで保存されている
-```
-
-期待動作: `fsync_pairing_consumed` / `fsync_pairing_expired` / `fsync_signature_invalid` のような**終端エラー**では import を巻き戻す。`fsync_network_error` のような**再試行可能エラー**では残す（現在の意図はそちら）。`Fsync_Client::decode()` が既に `retryable` フラグを付けているので、それを判定に使えます。
-
-セキュリティホールではありません（同じ秘密が同じ鍵で暗号化されて2箇所にあるだけ）が、ピア一覧が汚れ、どれが本物か分からなくなります。
-
-### 4.2 【中】環境名の衝突で別サイトのピアを上書きする
-
-`class-fsync-pairing.php:confirm()` と `import()` は `env_name` で既存ピアを探し、あれば同じ `peer_id` を再利用して**URL を上書き**します。異なる 2 サイトが同じ環境名（例: どちらも `local`）で接続してくると、後から来た方が前のピアを乗っ取ります。
-
-`peers` テーブルは `env_name` に UNIQUE 制約があるため、別 peer_id での共存もできません。
-
-要検討: 確定時に「既存ピアの URL と一致しない場合は新しい環境名を要求する」か、`(env_name, url)` で同一性を判断するか。
-
-### 4.3 【中】nonce の INSERT 失敗を一律「リプレイ」と報告する
-
-`class-fsync-nonce-store.php:64` は `$wpdb->insert()` が false を返したとき、テーブルの存在だけを確認して、それ以外はすべて `fsync_nonce_replayed` にしています。カラム長超過・接続断・デッドロックも「リプレイ」と表示されます。
-
-改善案: `$wpdb->last_error` に重複キーを示す文字列（`Duplicate entry`）が含まれるかを見て分岐する。
-
-### 4.4 【中】不正な正規表現が黙って無視される
-
-`class-fsync-config.php:315` は `@preg_match($pattern, $name)`。設定の `protected_extra` や `options.allow` に壊れた正規表現（例: `/^foo(/`）を書くと、**エラーにならず単にマッチしなくなります**。保護リストに書いたつもりのものが保護されません。
-
-改善案: `Fsync_Config_Validate` で、スラッシュ囲みのパターンを `preg_match` にかけて妥当性を検証し、エラーとして JSON Pointer 付きで返す。
-
-### 4.5 【低】introspect のメタキー集計が全表スキャン
-
-`class-fsync-introspect.php:166` の `GROUP BY meta_key` は `wp_postmeta` 全体を走査します。20万行規模で数秒〜数十秒。`/config/introspect` は既定で `include_meta_keys=true` なので、大きなサイトでこのエンドポイントを叩くとタイムアウトし得ます。
-
-改善案: `Fsync_Budget` を使って途中で打ち切り、`truncated: true` を返す。または既定を false にする。
-
-### 4.6 【低】`Fsync_Env::report()` が毎回 DB ロックを取得する
-
-`supports_get_lock()`（`class-fsync-env.php:231`）は `GET_LOCK` / `IS_USED_LOCK` / `RELEASE_LOCK` の3クエリを発行します。`report()` はリクエスト内でメモ化されていますが、ハンドシェイク・status・introspect のたびに実行されます。結果を transient にキャッシュしてよいはずです。
+この時点で再現可能な既知不具合は残っていません。未実装機能は §8、なお検証が弱い境界条件は §6 を参照してください。
 
 ---
 
@@ -196,19 +155,28 @@ peer-production a995d832 / peer-production2 a995d832  ← 同じ秘密が2つの
 
 **信頼してよい部分**（実際に実行して確認済み）:
 
-- 静的テスト 264 アサーション（`tests/run.php`、PHP 8.0）
+- 静的テスト 341 アサーション（`tests/run.php`、PHP 8.0）
   - ハッシュ安定性、不正 UTF-8 の検出、パストラバーサル拒否
   - 暗号: 往復・AAD 束縛・改竄検出・鍵変更検出・カナリア
   - 署名: 正規化文字列の8行構造、全要素が署名に効くこと、時刻ずれ
   - CIDR 照合（非バイト境界・IPv4/IPv6 混在含む）
-  - JSONC 解析（**文字列中の `//` を壊さないこと**）、設定検証、秘匿値の混入拒否
+  - JSONC 解析（**文字列中の `//` を壊さないこと**、未終端コメント・トップレベル配列の拒否）、設定検証、秘匿値の混入拒否
+  - 生成 JSON Schema の再帰検証、環境/スコープ上書き、通知先 URL、壊れた正規表現
   - 同梱の `flares-sync.config.example.jsonc` 自体が解析・検証を通ること
-- 実環境テスト 26項目 × 2環境（`docker/verify-pairing.sh`）
+- 実環境テスト 61項目＋補助検証 × 2環境（`docker/verify-pairing.sh`）
   - ペアリング成立、blob 使い捨て、認証情報が値を返さないこと
+  - 終端エラーの巻き戻し、環境名衝突拒否、旧受信キーの失効、実 HTTP での IP 拒否
   - ハンドシェイク、チャンクサイズ交渉（256KiB の倍数）
   - **nonce リプレイ拒否・署名改竄拒否・1時間前のタイムスタンプ拒否**
-  - introspect が保護対象オプションを返さないこと
-- 管理画面3枚が致命的エラーなくレンダリングされること（スモークのみ）
+  - introspect の保護対象除外・メタ集計 opt-in、設定ファイル優先/fail-closed
+  - キーローテーションと猶予期間、REST 設定適用・履歴・no-op 保存・不正設定拒否
+- 管理画面をブラウザ操作
+  - 設定ビルダー生成、検証（警告0件）、適用、履歴、公開 HTTP URL 拒否
+  - ピア削除時の認証情報消去、不正 IP 入力の拒否、診断と保存領域の自己修復
+  - 対象ページの JavaScript コンソールにプラグイン由来のエラーなし
+- `uninstall.php` を Docker 本番役で実行
+  - 6テーブル、オプション、transient、cron の削除
+  - 非公開保存領域は意図どおり保持し、再有効化後にスキーマと受信設定を復元
 
 ---
 
@@ -216,13 +184,11 @@ peer-production a995d832 / peer-production2 a995d832  ← 同じ秘密が2つの
 
 優先的に疑うべき順:
 
-1. **管理画面のフォーム処理。** レンダリングは確認しましたが、**POST ハンドラは一度も実行していません**（`Fsync_Admin::handle_post` 経由の 10 個の handler）。nonce・リダイレクト・transient 経由の通知、特に `Fsync_Admin_Config::handle_build()` のビルダー出力は未検証です。
-2. **`Fsync_Config_Io` のファイル経路。** テストは `parse()` と `merge()` のみ。実際に `wp-content/flares-sync.config.jsonc` を置いて `locate()` → `load()` → 管理画面が読み取り専用になる、という流れは未実行です。
-3. **キーのローテーションと猶予期間。** `Fsync_Keys::rotate()` は一度も呼ばれていません。`grace_until` を使った `usable()` の分岐も未検証。
-4. **IP 許可リストの実挙動。** `ip_matches()` は単体テスト済みですが、`Fsync_Auth::check_ip()` と `client_ip()`（信頼プロキシ判定）はリクエスト経路で未検証。
-5. **`/config/apply` の REST 経路。** 静的テストは `Fsync_Config_Validate::check()` を直接呼んでいるだけ。REST 経由の保存・履歴記録・差分計算は未実行。
-6. **`uninstall.php`。** 一度も実行していません。
-7. **`Fsync_Signer::normalize_query` と WordPress の実挙動。** 受信側は `$request->get_query_params()` を署名対象にします。WordPress や他プラグインがクエリパラメータを注入すると署名が壊れます（例: JS クライアント由来の `_locale`）。サーバー間通信では現状問題ありませんが、経路が増えたら疑うべき箇所です。
+1. **実ロードバランサーでの信頼プロキシ連鎖。** IPv4/IPv6 と複数段 X-Forwarded-For は単体検証済みですが、nginx/Cloudflare/レンタルサーバー固有のヘッダー書き換えまでは再現していません。
+2. **`Fsync_Signer::normalize_query` と他プラグインの干渉。** 受信側は `$request->get_query_params()` を署名対象にします。他プラグインが `_locale` などを注入すると署名が壊れ得ます。現在のサーバー間経路では問題ありません。
+3. **外部通知サービスの実送信。** Slack/webhook/email の設定形状と秘密情報分離は検証済みですが、実アカウントへの配信、レート制限、相手側障害は未検証です。
+4. **DB 障害注入の網羅。** 主要な insert/update/delete 失敗はスタブで確認していますが、MariaDB の接続断、デッドロック、ディスク枯渇を実コンテナで強制した耐障害テストは未実施です。
+5. **大規模データでの性能。** メタキー集計は opt-in、ロック判定はキャッシュ済みですが、数百万行級 DB での計測はフェーズ2の差分エンジンと合わせて必要です。
 
 ---
 
@@ -268,18 +234,4 @@ WordPress 公式イメージは `WORDPRESS_CONFIG_EXTRA` を**実行時に `eval
 
 静的な `schema/config.schema.json` は**意図的に用意していません**。汎用スキーマは「post_types はオブジェクト」としか言えませんが、`/config/schema` が生成するサイト固有スキーマは実在する投稿タイプ名だけを `enum` に入れるため、存在しない名前を機械的に弾けます。設定例もそちらを取得する手順を案内しています。
 
-設計はすべて `~/.claude/plans/wordpress-optimized-moon.md` にあります（15セクション）。特に §1（可搬形式と三方向差分）と §4（リリース昇格）は、実装前に読む前提で書かれています。
-
----
-
-## 9. 既存プラグインの重大バグ（参考・別リポジトリ）
-
-このプラグインの前身 `shusei-club-yokkaichi-hp/wp-content/plugins/shusei-deploy` に、**稼働中サイトを壊しうるバグ**があります。
-
-`includes/class-shusei-deploy-rest.php:1564` の `rewrite_urls()` が、PHP シリアライズ済みデータに対して生の `str_replace` で URL 置換を行っています。`s:29:"http://localhost:8082/img.png"` を置換すると長さ表記が実体とずれ、`unserialize()` が `false` を返して**メタ値が恒久的に破壊されます**。
-
-現在無事なのは、同期対象メタ（`event_meta_keys()` / `column_meta_keys()`）が偶然すべてスカラー値だからです。**同期対象を広げた瞬間に ACF・Elementor・`theme_mods_*` を壊します。**
-
-加えて Gutenberg のブロック属性は `http:\/\/` とエスケープされているため、その形の URL は 1 つも書き換わっていないはずです（画像が壊れている可能性あり）。
-
-Flares Sync ではここを可搬形式パイプライン（送信側でトークン化 → 受信側で `serialize()` により長さを再計算）で作り直す設計です。
+フェーズ2以降を実装するときは、可搬形式、三方向差分、リリース昇格の仕様を、この公開リポジトリ内の設計文書として先に追加してください。非公開またはローカル専用の設計資料を前提にしないこと。

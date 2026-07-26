@@ -75,9 +75,9 @@ seed_content() {
     fi
 }
 
-install_site /sites/local      http://localhost:8091 "Flares Sync ローカル"     local      db_local "${FSYNC_CONFIG_LOCAL}"
-install_site /sites/staging    http://localhost:8092 "Flares Sync ステージング" staging    db_stg   "${FSYNC_CONFIG_STG}"
-install_site /sites/production http://localhost:8093 "Flares Sync 本番"         production db_prod  "${FSYNC_CONFIG_PROD}"
+install_site /sites/local      http://localhost:8091 "Yamashin WP Migration ローカル"     local      db_local "${FSYNC_CONFIG_LOCAL}"
+install_site /sites/staging    http://localhost:8092 "Yamashin WP Migration ステージング" staging    db_stg   "${FSYNC_CONFIG_STG}"
+install_site /sites/production http://localhost:8093 "Yamashin WP Migration 本番"         production db_prod  "${FSYNC_CONFIG_PROD}"
 
 # Only the source gets seed content; the others start empty so that the first
 # promotion has something real to create.

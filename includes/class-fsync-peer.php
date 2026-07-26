@@ -16,6 +16,9 @@ final class Fsync_Peer
 {
     const STATUS_ACTIVE = 'active';
     const STATUS_DISABLED = 'disabled';
+    // Pair credentials use the deterministic id "peer-<environment>" and the
+    // credential table allows 64 characters, leaving 59 for the environment.
+    const ENV_NAME_PATTERN = '^[a-z0-9][a-z0-9_-]{0,58}$';
 
     /**
      * Create or update a peer record.
@@ -41,25 +44,36 @@ final class Fsync_Peer
             return $env_name;
         }
 
-        $handshake = Fsync_Utils::encode((array) ($args['handshake'] ?? array()));
+        $existing = self::find($peer_id);
+
+        $handshake_value = array_key_exists('handshake', $args)
+            ? (array) $args['handshake']
+            : (array) ($existing['handshake'] ?? array());
+        $handshake = Fsync_Utils::encode($handshake_value);
         if (is_wp_error($handshake)) {
-            $handshake = '{}';
+            return new WP_Error('fsync_peer_encode_failed', 'ピアのハンドシェイク情報を保存できませんでした。');
         }
 
         $row = array(
             'peer_id' => $peer_id,
             'env_name' => $env_name,
-            'site_role' => substr((string) ($args['site_role'] ?? ''), 0, 32),
-            'url' => esc_url_raw((string) ($args['url'] ?? '')),
-            'outbound_key_id' => substr((string) ($args['outbound_key_id'] ?? ''), 0, 32),
-            'scope_fingerprint' => substr((string) ($args['scope_fingerprint'] ?? ''), 0, 64),
+            'site_role' => substr((string) ($args['site_role'] ?? ($existing['site_role'] ?? '')), 0, 32),
+            'url' => esc_url_raw((string) ($args['url'] ?? ($existing['url'] ?? ''))),
+            'outbound_key_id' => substr(
+                (string) ($args['outbound_key_id'] ?? ($existing['outbound_key_id'] ?? '')),
+                0,
+                32
+            ),
+            'scope_fingerprint' => substr(
+                (string) ($args['scope_fingerprint'] ?? ($existing['scope_fingerprint'] ?? '')),
+                0,
+                64
+            ),
             'handshake' => $handshake,
-            'last_contact_at' => (int) ($args['last_contact_at'] ?? 0),
-            'clock_skew' => (int) ($args['clock_skew'] ?? 0),
-            'status' => (string) ($args['status'] ?? self::STATUS_ACTIVE),
+            'last_contact_at' => (int) ($args['last_contact_at'] ?? ($existing['last_contact_at'] ?? 0)),
+            'clock_skew' => (int) ($args['clock_skew'] ?? ($existing['clock_skew'] ?? 0)),
+            'status' => (string) ($args['status'] ?? ($existing['status'] ?? self::STATUS_ACTIVE)),
         );
-
-        $existing = self::find($peer_id);
 
         if ($existing === null) {
             $row['created_at'] = Fsync_Utils::now();
@@ -154,19 +168,27 @@ final class Fsync_Peer
 
     /**
      * @param string $peer_id
-     * @return void
+     * @return true|WP_Error
      */
     public static function forget($peer_id)
     {
         global $wpdb;
 
-        $wpdb->delete(Fsync_Schema::table('peers'), array('peer_id' => (string) $peer_id));
+        $deleted = $wpdb->delete(Fsync_Schema::table('peers'), array('peer_id' => (string) $peer_id));
+        if ($deleted === false) {
+            return new WP_Error('fsync_peer_delete_failed', 'ピアを削除できませんでした。');
+        }
+        if ($deleted === 0) {
+            return new WP_Error('fsync_peer_missing', 'ピアが見つかりません。');
+        }
 
         Fsync_Log::warning(
             'peer_removed',
             sprintf('ピアを削除しました: %s', $peer_id),
             array('peer_id' => (string) $peer_id)
         );
+
+        return true;
     }
 
     /**
@@ -177,10 +199,10 @@ final class Fsync_Peer
     {
         $env_name = strtolower(trim((string) $env_name));
 
-        if ($env_name === '' || ! preg_match('/^[a-z0-9][a-z0-9_-]{0,63}$/', $env_name)) {
+        if ($env_name === '' || preg_match('#' . self::ENV_NAME_PATTERN . '#', $env_name) !== 1) {
             return new WP_Error(
                 'fsync_env_name_invalid',
-                '環境名は英数字・ハイフン・アンダースコアのみ使用できます。'
+                '環境名は59文字以内の英数字・ハイフン・アンダースコアで指定してください。'
             );
         }
 

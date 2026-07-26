@@ -44,6 +44,24 @@ foreach (
     delete_option($option);
 }
 
+// Remove fixed and per-user transients created by the admin and environment
+// probes. Expired transients are not guaranteed to have been garbage-collected
+// before uninstall, so leaving them would violate the promise that plugin
+// state is removed.
+delete_transient('fsync_supports_get_lock');
+
+foreach (array('fsync_pairing_blob_', 'fsync_notice_', 'fsync_config_draft_', 'fsync_config_result_') as $prefix) {
+    $value_like = $wpdb->esc_like('_transient_' . $prefix) . '%';
+    $timeout_like = $wpdb->esc_like('_transient_timeout_' . $prefix) . '%';
+    $wpdb->query(
+        $wpdb->prepare(
+            "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+            $value_like,
+            $timeout_like
+        )
+    );
+}
+
 // Scheduled work.
 wp_clear_scheduled_hook('fsync_tick');
 wp_clear_scheduled_hook('fsync_run_now');

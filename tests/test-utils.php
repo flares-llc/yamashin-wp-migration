@@ -89,3 +89,14 @@ T::ok(
     Fsync_Utils::fingerprint('a') !== Fsync_Utils::fingerprint('b'),
     'different secrets fingerprint differently'
 );
+
+T::group('Fsync_Fs private storage');
+
+$private_ready = Fsync_Fs::ensure_private_storage();
+T::same(true, $private_ready, 'private storage can be initialized');
+T::ok(is_file(Fsync_Fs::private_dir('.htaccess')), 'private storage includes an Apache deny rule');
+T::ok(is_file(Fsync_Fs::private_dir('index.php')), 'private storage includes an index guard');
+foreach (array('objects', 'releases', 'backups', 'jobs', 'tmp', 'snapshots') as $directory) {
+    T::ok(is_dir(Fsync_Fs::private_dir($directory)), sprintf('private storage includes %s', $directory));
+}
+T::ok(Fsync_Fs::delete_private_tree(Fsync_Fs::private_dir()), 'the standalone private-storage fixture is cleaned up');

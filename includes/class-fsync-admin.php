@@ -28,8 +28,8 @@ final class Fsync_Admin
     public static function register_menu()
     {
         add_menu_page(
-            'Flares Sync',
-            'Flares Sync',
+            'Yamashin WP Migration',
+            'Yamashin WP Migration',
             self::CAPABILITY,
             self::SLUG,
             [Fsync_Admin_Connection::class, 'render'],

@@ -48,6 +48,11 @@ final class Fsync_Credentials
             return $credential_id;
         }
 
+        $kind = (string) $kind;
+        if (! isset(self::KINDS[$kind])) {
+            return new WP_Error('fsync_credential_kind_invalid', '認証情報の種類が不正です。');
+        }
+
         if ((string) $plaintext === '') {
             return new WP_Error('fsync_credential_empty', '値が空です。削除する場合は「クリア」を実行してください。');
         }
@@ -63,7 +68,7 @@ final class Fsync_Credentials
 
         $row = array(
             'credential_id' => $credential_id,
-            'kind' => substr((string) $kind, 0, 32),
+            'kind' => $kind,
             'ciphertext' => $ciphertext,
             'fingerprint' => Fsync_Utils::fingerprint($plaintext),
             'key_ref' => is_wp_error($master) ? '' : $master['ref'],
@@ -201,7 +206,13 @@ final class Fsync_Credentials
             return $credential_id;
         }
 
-        $wpdb->delete(Fsync_Schema::table('credentials'), array('credential_id' => $credential_id));
+        $deleted = $wpdb->delete(Fsync_Schema::table('credentials'), array('credential_id' => $credential_id));
+        if ($deleted === false) {
+            return new WP_Error('fsync_credential_delete_failed', '認証情報を削除できませんでした。');
+        }
+        if ($deleted === 0) {
+            return new WP_Error('fsync_credential_missing', '認証情報が見つかりません。');
+        }
 
         Fsync_Log::warning(
             'credential_cleared',

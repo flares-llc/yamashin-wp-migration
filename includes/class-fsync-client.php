@@ -232,6 +232,10 @@ final class Fsync_Client
                 : array();
             $data['status'] = $code;
 
+            if (in_array($code, array(408, 425, 429, 500, 502, 503, 504), true)) {
+                $data['retryable'] = true;
+            }
+
             return new WP_Error($code_string, $message, $data);
         }
 
