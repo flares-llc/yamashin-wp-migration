@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+
+# Hand-built distribution ZIPs. The plugin is installed through the WordPress
+# admin uploader, so these get produced ad hoc and should not be tracked.
+/dist/
+*.zip
+
+# Dependencies. Not used today -- the plugin deliberately avoids Composer so it
+# can ship as a self-contained ZIP -- but present so an accidental install does
+# not get committed.
+/vendor/
+/node_modules/
+
+# The plugin's private storage: snapshots, releases, backups and the fallback
+# keyfile. Never belongs in version control.
+.flares-sync/
+
+# A real configuration document is per-project and may name internal hostnames.
+# Commit it deliberately from the project repo that owns it, not from here.
+# The example stays tracked.
+flares-sync.config.jsonc
+flares-sync.config.json
+flares-sync.config.*.jsonc
+!flares-sync.config.example.jsonc
+
+# Logs and editor scratch
+*.log
+*~
+.idea/
+.vscode/
