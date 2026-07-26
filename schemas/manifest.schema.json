@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/flares-llc/yamashin-wp-migration/schemas/manifest.schema.json",
+  "title": "Yamashin WP Migration Merkle manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "manifest_id", "profile", "scope_fingerprint", "root_hash", "bucket_hashes", "items", "item_count", "total_bytes", "created_at"],
+  "properties": {
+    "format_version": { "const": 1 },
+    "manifest_id": { "$ref": "#/$defs/id" },
+    "profile": { "enum": ["content", "full"] },
+    "peer_env": { "type": "string" },
+    "scope_fingerprint": { "$ref": "#/$defs/sha256" },
+    "root_hash": { "$ref": "#/$defs/sha256" },
+    "bucket_hashes": {
+      "type": "object",
+      "minProperties": 256,
+      "maxProperties": 256,
+      "propertyNames": { "pattern": "^[a-f0-9]{2}$" },
+      "additionalProperties": { "$ref": "#/$defs/sha256" }
+    },
+    "items": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "kind", "uid", "identity_key", "hash", "payload_hash", "has_relationships", "objects", "bytes", "bucket"],
+        "properties": {
+          "key": { "type": "string" },
+          "kind": { "type": "string" },
+          "uid": { "type": "string" },
+          "identity_key": { "type": "string", "pattern": "^$|^[a-f0-9]{64}$" },
+          "hash": { "$ref": "#/$defs/sha256" },
+          "payload_hash": { "$ref": "#/$defs/sha256" },
+          "has_relationships": { "type": "boolean" },
+          "objects": { "type": "array", "items": { "$ref": "#/$defs/sha256" } },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "bucket": { "type": "integer", "minimum": 0, "maximum": 255 }
+        }
+      }
+    },
+    "item_count": { "type": "integer", "minimum": 0 },
+    "total_bytes": { "type": "integer", "minimum": 0 },
+    "created_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

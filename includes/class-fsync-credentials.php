@@ -23,9 +23,6 @@ final class Fsync_Credentials
     /** Known credential kinds, used for validation and UI labelling. */
     const KINDS = array(
         'peer' => 'ピア接続の共有シークレット',
-        'gcs' => 'Google Cloud Storage サービスアカウント JSON',
-        'gdrive' => 'Google Drive サービスアカウント JSON',
-        'gdrive_oauth' => 'Google Drive OAuth クライアント/リフレッシュトークン',
         'slack' => 'Slack Incoming Webhook URL',
         'webhook' => '汎用 Webhook の署名シークレット',
         'tick' => '外部トリガー用トークン',

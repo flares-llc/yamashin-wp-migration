@@ -11,6 +11,8 @@
 # not get committed.
 /vendor/
 /node_modules/
+**/node_modules/
+**/dist/
 
 # The plugin's private storage: snapshots, releases, backups and the fallback
 # keyfile. Never belongs in version control.

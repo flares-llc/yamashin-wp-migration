@@ -364,7 +364,7 @@ final class Fsync_Admin_Connection
         print '<table class="form-table"><tbody>';
 
         print '<tr><th scope="row">ID</th><td>';
-        print '<input type="text" name="credential_id" class="regular-text" required placeholder="gcs-backup">';
+        print '<input type="text" name="credential_id" class="regular-text" required placeholder="ops-webhook">';
         print '</td></tr>';
 
         print '<tr><th scope="row">種類</th><td><select name="kind">';
@@ -375,7 +375,7 @@ final class Fsync_Admin_Connection
 
         print '<tr><th scope="row">値</th><td>';
         print '<textarea name="value" class="large-text code" rows="4" required '
-            . 'placeholder="サービスアカウントJSONやWebhook URLなど"></textarea>';
+            . 'placeholder="共有シークレットやWebhook URL"></textarea>';
         print '<p class="description">保存後は表示されません。</p></td></tr>';
 
         print '</tbody></table>';

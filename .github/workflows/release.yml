@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.5
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
+      - name: Verify tag is on main
+        run: git branch -r --contains "$GITHUB_SHA" | grep -q 'origin/main'
+      - name: Build immutable assets
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          ./scripts/build-release.sh "$version" "$GITHUB_SHA"
+          npm --prefix mcp ci
+          npm --prefix mcp run check
+          npm --prefix mcp run build
+          npm pack ./mcp --pack-destination dist
+          mv "dist/yamashin-wp-migration-mcp-${version}.tgz" dist/yamashin-wp-migration-mcp.tgz
+          (cd dist && shasum -a 256 yamashin-wp-migration-mcp.tgz > yamashin-wp-migration-mcp.tgz.sha256)
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          notes_args=(--generate-notes)
+          if [[ -f "docs/releases/${version}.md" ]]; then
+            notes_args=(--notes-file "docs/releases/${version}.md")
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/yamashin-wp-migration-${version}.zip" \
+            "dist/yamashin-wp-migration-${version}.zip.sha256" \
+            dist/yamashin-wp-migration-mcp.tgz \
+            dist/yamashin-wp-migration-mcp.tgz.sha256 \
+            --verify-tag "${notes_args[@]}" \
+            --title "Yamashin WP Migration ${GITHUB_REF_NAME}"

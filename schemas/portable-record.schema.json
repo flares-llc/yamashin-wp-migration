@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/flares-llc/yamashin-wp-migration/schemas/portable-record.schema.json",
+  "title": "Yamashin WP Migration portable record",
+  "type": "object",
+  "required": ["format_version", "kind", "uid", "data", "objects"],
+  "additionalProperties": false,
+  "properties": {
+    "format_version": { "const": 1 },
+    "kind": { "enum": ["post", "term", "comment", "user", "option", "table", "file", "runtime"] },
+    "uid": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{8,191}$" },
+    "data": { "type": "object" },
+    "objects": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/sha256" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

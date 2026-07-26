@@ -39,6 +39,9 @@ foreach (
         'fsync_trusted_proxies',
         'fsync_crypto_canary',
         'fsync_schema_version',
+        'fsync_apply_lock',
+        'fsync_runtime_guard',
+        'fsync_runtime_guard_failed',
     ) as $option
 ) {
     delete_option($option);
@@ -50,7 +53,7 @@ foreach (
 // state is removed.
 delete_transient('fsync_supports_get_lock');
 
-foreach (array('fsync_pairing_blob_', 'fsync_notice_', 'fsync_config_draft_', 'fsync_config_result_') as $prefix) {
+foreach (array('fsync_pairing_blob_', 'fsync_notice_', 'fsync_config_draft_', 'fsync_config_result_', 'fsync_apply_confirm_', 'fsync_mcp_token_') as $prefix) {
     $value_like = $wpdb->esc_like('_transient_' . $prefix) . '%';
     $timeout_like = $wpdb->esc_like('_transient_timeout_' . $prefix) . '%';
     $wpdb->query(
@@ -60,6 +63,11 @@ foreach (array('fsync_pairing_blob_', 'fsync_notice_', 'fsync_config_draft_', 'f
             $timeout_like
         )
     );
+}
+
+// Portable UIDs are internal identity state rather than user content.
+foreach (array($wpdb->postmeta, $wpdb->termmeta, $wpdb->commentmeta, $wpdb->usermeta) as $meta_table) {
+    $wpdb->delete($meta_table, array('meta_key' => '_fsync_uid'));
 }
 
 // Scheduled work.

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/flares-llc/yamashin-wp-migration/schemas/job.schema.json",
+  "title": "Yamashin WP Migration resumable job",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["job_id", "release_id", "operation", "status", "phase", "cursor", "attempts", "progress", "total", "payload", "result", "error", "heartbeat_at", "created_at", "updated_at"],
+  "properties": {
+    "job_id": { "$ref": "#/$defs/id" },
+    "release_id": { "$ref": "#/$defs/optionalId" },
+    "operation": { "enum": ["push_release", "pull_release", "apply_release"] },
+    "status": { "enum": ["queued", "running", "awaiting_confirmation", "complete", "failed", "cancelled"] },
+    "phase": { "type": "string", "maxLength": 32 },
+    "cursor": { "type": "integer", "minimum": 0 },
+    "attempts": { "type": "integer", "minimum": 0 },
+    "progress": { "type": "integer", "minimum": 0 },
+    "total": { "type": "integer", "minimum": 0 },
+    "payload": { "type": "object" },
+    "result": { "type": "object" },
+    "error": { "type": "string" },
+    "heartbeat_at": { "type": "integer", "minimum": 0 },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+    "optionalId": { "type": "string", "pattern": "^$|^[a-f0-9]{32}$" }
+  }
+}

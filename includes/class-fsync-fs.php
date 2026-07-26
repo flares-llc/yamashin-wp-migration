@@ -27,6 +27,12 @@ final class Fsync_Fs
         '.svn',
         '.hg',
         'node_modules',
+        '.env',
+        '.env.*',
+        'wp-config*.php',
+        '.user.ini',
+        'php.ini',
+        'fsync-guard.php',
         '.DS_Store',
         'Thumbs.db',
     );
@@ -67,7 +73,7 @@ final class Fsync_Fs
     {
         $dir = self::private_dir();
 
-        if (! wp_mkdir_p($dir)) {
+        if (! is_dir($dir) && ! wp_mkdir_p($dir)) {
             return new WP_Error(
                 'fsync_storage_failed',
                 sprintf('保存領域を作成できません: %s', $dir)
@@ -101,7 +107,7 @@ final class Fsync_Fs
         }
 
         foreach (array('objects', 'releases', 'backups', 'jobs', 'tmp', 'snapshots') as $child) {
-            if (! wp_mkdir_p($dir . '/' . $child)) {
+            if (! is_dir($dir . '/' . $child) && ! wp_mkdir_p($dir . '/' . $child)) {
                 return new WP_Error(
                     'fsync_storage_failed',
                     sprintf('保存領域を作成できません: %s', $dir . '/' . $child)
@@ -185,7 +191,14 @@ final class Fsync_Fs
     public static function write_atomic($path, $contents)
     {
         $dir = dirname($path);
-        if (! wp_mkdir_p($dir)) {
+        // Some filesystem wrappers return false from mkdir even when another
+        // worker has already created the directory. Treat an existing
+        // directory as success, then let the write itself report permissions.
+        if (! is_dir($dir)) {
+            wp_mkdir_p($dir);
+            clearstatcache(true, $dir);
+        }
+        if (! is_dir($dir)) {
             return new WP_Error('fsync_mkdir_failed', sprintf('ディレクトリを作成できません: %s', $dir));
         }
 
@@ -247,6 +260,47 @@ final class Fsync_Fs
         }
 
         return Fsync_Utils::decode($raw);
+    }
+
+    /** Clone a directory without following symlinks. */
+    public static function copy_tree($source, $destination)
+    {
+        $source = untrailingslashit(str_replace('\\', '/', (string) $source));
+        $destination = untrailingslashit(str_replace('\\', '/', (string) $destination));
+        if (! is_dir($destination)) {
+            wp_mkdir_p($destination);
+            clearstatcache(true, $destination);
+        }
+        if (! is_dir($destination)) {
+            return new WP_Error('fsync_stage_mkdir_failed', 'コード検査用ディレクトリを作成できません。');
+        }
+        if (! is_dir($source)) {
+            return true;
+        }
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($source, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($iterator as $entry) {
+            $relative = ltrim(str_replace('\\', '/', substr($entry->getPathname(), strlen($source))), '/');
+            $target = $destination . '/' . $relative;
+            if ($entry->isLink()) {
+                if (! wp_mkdir_p(dirname($target)) || ! @symlink((string) readlink($entry->getPathname()), $target)) {
+                    return new WP_Error('fsync_stage_symlink_failed', sprintf('シンボリックリンクを退避できません: %s', $relative));
+                }
+            } elseif ($entry->isDir()) {
+                if (! wp_mkdir_p($target)) {
+                    return new WP_Error('fsync_stage_mkdir_failed', sprintf('ディレクトリを退避できません: %s', $relative));
+                }
+            } elseif ($entry->isFile()) {
+                if (! wp_mkdir_p(dirname($target)) || ! @copy($entry->getPathname(), $target)) {
+                    return new WP_Error('fsync_stage_copy_failed', sprintf('ファイルを退避できません: %s', $relative));
+                }
+                @chmod($target, $entry->getPerms() & 0777);
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -344,6 +398,14 @@ final class Fsync_Fs
         $segments = explode('/', $relative);
 
         foreach ($patterns as $pattern) {
+            if (strpbrk($pattern, '*?[') !== false) {
+                foreach ($segments as $segment) {
+                    if (fnmatch($pattern, $segment)) {
+                        return true;
+                    }
+                }
+                continue;
+            }
             if (strpos($pattern, '/') !== false) {
                 if ($relative === $pattern || strpos($relative, rtrim($pattern, '/') . '/') === 0) {
                     return true;

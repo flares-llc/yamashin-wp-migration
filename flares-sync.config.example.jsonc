@@ -60,11 +60,23 @@
         "post_tag": { "meta": { "mode": "all" } }
       },
 
+      "comments": true,
+      "comments_delete": false,
+
+      // ユーザーは login を安定キーとして統合します。セッションは移りません。
+      // パスワードハッシュの転送は、明示的に true にした場合だけです。
+      "users": {
+        "enabled": true,
+        "passwords": false,
+        "delete": false
+      },
+
       // Options are ALLOWLIST ONLY. There is no deny form, deliberately:
       // the dangerous options are the ones nobody remembered to exclude
       // (licence keys, other plugins' install state, cron arrays).
       // Entries wrapped in slashes are regular expressions.
       "options": {
+        "delete": false,
         "allow": [
           "blogdescription",
           "/^theme_mods_/"
@@ -78,14 +90,16 @@
       "files": {
         "uploads": true,
         "theme": ["my-theme"],
-        // Plugin files are off by default. Activation state (active_plugins)
-        // is never synced regardless of this setting.
+        // Plugin files are off by default. When enabled, selected code is
+        // validated and switched before its activation state is applied.
         "plugins": false,
+        "mu_plugins": false,
         // "checksum-only" compares against the official WordPress checksums
         // and reports modified, missing and extra core files without
         // transferring anything. "sync" additionally transfers, and refuses
         // to run when the two sites are on different WordPress versions.
-        "core": "checksum-only"
+        "core": "checksum-only",
+        "delete": false
       },
 
       // Meta keys that hold post/term/user IDs. These are transported as
@@ -150,7 +164,7 @@
   // file can serve every installation.
   "environment_overrides": {
     "production": {
-      "backup": { "destinations": ["local", "gcs-main"] }
+      "backup": { "destinations": ["local"] }
     },
     "local": {
       "backup": { "destinations": ["local"] }
@@ -168,24 +182,6 @@
     ],
     "retention": { "keep": 10, "safety_backup_days": 7 },
     "destinations": ["local"]
-  },
-
-  "storage": {
-    "gcs-main": {
-      "type": "gcs",
-      "bucket": "example-wp-backups",
-      "prefix": "example-jp/",
-      "credential": "gcs-backup"
-    }
-    // Google Drive requires a shared drive: a service account has no
-    // personal Drive quota, so uploading to a personal folder fails with
-    // storageQuotaExceeded.
-    //
-    // "gdrive-main": {
-    //   "type": "gdrive",
-    //   "shared_drive_id": "0ABCdefGHIjklMNO",
-    //   "credential": "gdrive-backup"
-    // }
   },
 
   "schedules": [

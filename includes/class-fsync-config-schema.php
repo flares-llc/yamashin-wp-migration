@@ -140,6 +140,20 @@ final class Fsync_Config_Schema
                                 ),
                             ),
                         ),
+                        'comments' => array('type' => 'boolean'),
+                        'comments_delete' => array('type' => 'boolean'),
+                        'users' => array(
+                            'type' => 'object',
+                            'additionalProperties' => false,
+                            'properties' => array(
+                                'enabled' => array('type' => 'boolean'),
+                                'passwords' => array(
+                                    'type' => 'boolean',
+                                    'description' => 'パスワードハッシュは明示許可時のみ移行し、セッションは常に除外します。',
+                                ),
+                                'delete' => array('type' => 'boolean'),
+                            ),
+                        ),
                         'options' => array(
                             'type' => 'object',
                             'additionalProperties' => false,
@@ -154,21 +168,43 @@ final class Fsync_Config_Schema
                                         ),
                                     ),
                                 ),
+                                'delete' => array('type' => 'boolean'),
                             ),
                         ),
                         'tables' => array(
                             'type' => 'array',
                             'items' => array(
                                 'type' => 'object',
-                                'required' => array('name', 'primary_key'),
+                                'required' => array('name'),
                                 'additionalProperties' => false,
                                 'properties' => array(
                                     'name' => self::names_of($tables),
-                                    'primary_key' => array('type' => 'string'),
-                                    'uid_column' => array('type' => 'string'),
-                                    'natural_key' => array('type' => 'array', 'items' => array('type' => 'string')),
-                                    'refs' => array('type' => 'object'),
-                                    'portable' => array('type' => 'object'),
+                                    'primary_key' => array('type' => 'string', 'pattern' => '^[A-Za-z0-9_]+$'),
+                                    'uid_column' => array('type' => 'string', 'pattern' => '^[A-Za-z0-9_]+$'),
+                                    'natural_key' => array('type' => 'array', 'items' => array('type' => 'string', 'pattern' => '^[A-Za-z0-9_]+$')),
+                                    'refs' => array(
+                                        'type' => 'object',
+                                        'propertyNames' => array('type' => 'string', 'pattern' => '^[A-Za-z0-9_]+$'),
+                                        'additionalProperties' => array(
+                                            'anyOf' => array(
+                                                array('type' => 'string', 'enum' => array('post', 'term', 'user')),
+                                                array(
+                                                    'type' => 'object',
+                                                    'required' => array('kind'),
+                                                    'additionalProperties' => false,
+                                                    'properties' => array(
+                                                        'kind' => array('type' => 'string', 'enum' => array('post', 'term', 'user')),
+                                                        'shape' => array('type' => 'string', 'enum' => array('scalar', 'csv', 'serialized_array')),
+                                                    ),
+                                                ),
+                                            ),
+                                        ),
+                                    ),
+                                    'portable' => array(
+                                        'type' => 'object',
+                                        'propertyNames' => array('type' => 'string', 'pattern' => '^[A-Za-z0-9_]+$'),
+                                        'additionalProperties' => array('type' => 'string', 'enum' => array('auto', 'url', 'serialized')),
+                                    ),
                                     'delete' => array('type' => 'boolean'),
                                 ),
                             ),
@@ -185,8 +221,9 @@ final class Fsync_Config_Schema
                                 'plugins' => array(
                                     'type' => array('array', 'boolean'),
                                     'items' => self::names_of($plugins),
-                                    'description' => '有効化状態(active_plugins)は同期されません。',
+                                    'description' => '選択したプラグインのコードと有効化状態を、検査後に適用します。',
                                 ),
+                                'mu_plugins' => array('type' => 'boolean'),
                                 'core' => array(
                                     'anyOf' => array(
                                         array('type' => 'boolean', 'const' => false),
@@ -194,6 +231,7 @@ final class Fsync_Config_Schema
                                     ),
                                     'description' => 'checksum-only は公式チェックサムとの差分を検出して報告するだけです。',
                                 ),
+                                'delete' => array('type' => 'boolean'),
                             ),
                         ),
                         'refs' => array(
@@ -278,7 +316,7 @@ final class Fsync_Config_Schema
                     ),
                     'transport' => array(
                         'type' => 'array',
-                        'items' => array('type' => 'string', 'enum' => array('https', 'ssh')),
+                        'items' => array('type' => 'string', 'enum' => array('https')),
                     ),
                     'promotes_to' => array(
                         'type' => 'array',
@@ -341,16 +379,9 @@ final class Fsync_Config_Schema
                 'required' => array('type'),
                 'additionalProperties' => false,
                 'properties' => array(
-                    'type' => array('type' => 'string', 'enum' => array('local', 'gcs', 'gdrive')),
-                    'bucket' => array('type' => 'string'),
+                    'type' => array('type' => 'string', 'enum' => array('local')),
                     'prefix' => array('type' => 'string'),
-                    'shared_drive_id' => array(
-                        'type' => 'string',
-                        'description' => 'Google Drive は共有ドライブが必須です。サービスアカウントには個人ドライブの容量がありません。',
-                    ),
                     'folder' => array('type' => 'string'),
-                    'oauth' => array('type' => 'boolean'),
-                    'credential' => array('type' => 'string'),
                 ),
             ),
         );

@@ -2,7 +2,10 @@
 /.gitignore export-ignore
 /HANDOFF.md export-ignore
 /SECURITY.md export-ignore
+/.github export-ignore
 /compose.yaml export-ignore
+/dist export-ignore
 /docker export-ignore
+/mcp export-ignore
 /scripts export-ignore
 /tests export-ignore

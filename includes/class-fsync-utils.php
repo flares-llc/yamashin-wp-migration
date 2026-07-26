@@ -183,6 +183,53 @@ final class Fsync_Utils
     }
 
     /**
+     * Random UUID v4 used as the portable identity of WordPress entities.
+     *
+     * @return string|WP_Error
+     */
+    public static function uuid4()
+    {
+        try {
+            $bytes = random_bytes(16);
+        } catch (Exception $exception) {
+            return new WP_Error('fsync_random_failed', '安全なUUIDを生成できません。');
+        }
+
+        $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+        $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+        $hex = bin2hex($bytes);
+
+        return sprintf(
+            '%s-%s-%s-%s-%s',
+            substr($hex, 0, 8),
+            substr($hex, 8, 4),
+            substr($hex, 12, 4),
+            substr($hex, 16, 4),
+            substr($hex, 20, 12)
+        );
+    }
+
+    /**
+     * @param mixed $value
+     * @return bool
+     */
+    public static function is_sha256($value)
+    {
+        return is_string($value) && preg_match('/^[a-f0-9]{64}$/', $value) === 1;
+    }
+
+    /**
+     * Validate a public opaque id without exposing incremental database ids.
+     *
+     * @param mixed $value
+     * @return bool
+     */
+    public static function is_public_id($value)
+    {
+        return is_string($value) && preg_match('/^[a-f0-9]{32}$/', $value) === 1;
+    }
+
+    /**
      * URL-safe base64 without padding, used for tokens and pairing blobs.
      *
      * @param string $raw

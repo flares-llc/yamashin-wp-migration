@@ -1,56 +1,67 @@
 === Yamashin WP Migration ===
 Contributors: shinroh
-Tags: migration, staging, hmac, configuration
+Tags: migration, staging, rollback, mcp, hmac
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 8.0
-Stable tag: 0.1.0
+Stable tag: 1.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-WordPress環境間の安全な差分移行に向けた、接続・署名認証・設定検証・診断の基盤です。
+WordPress環境間の差分をドライランし、明示確認後に適用・検証・ロールバックする一方向移行プラグインです。
 
 == Description ==
 
-Yamashin WP Migrationは、ローカル・ステージング・本番のWordPressを、安全に接続して管理するための基盤プラグインです。
+Yamashin WP Migrationは、ローカル、ステージング、本番を明示的に接続し、サイト全体またはコンテンツの差分を安全に移行します。自動双方向同期は行いません。
 
-バージョン0.1.0で利用できる機能:
+* 投稿、固定ページ、CPT、分類、メタ、コメント、添付、Uploads
+* ユーザー、許可済みオプション、登録済み独自テーブル
+* テーマ、プラグイン、mu-plugin、同一バージョンのWordPress本体
+* 可搬UID、SHA-256、Merkleバケット、receipt基点の三方向差分
+* ドライラン、項目単位の競合解決、明示削除
+* 適用前スナップショット、自動／手動ロールバック
+* HMAC署名REST API、Streamable HTTP MCP、stdioブリッジ
 
-* 使い捨て接続情報によるペアリング
-* HMAC-SHA256署名、nonceリプレイ防止、権限スコープ
-* 認証情報の暗号化保存
-* JSONC設定、環境オーバーレイ、検証、履歴
-* サイト固有JSON Schemaと設定用REST API
-* 管理画面の設定ビルダーと診断
-
-重要: バージョン0.1.0は基盤版です。投稿・メディアの差分検知、ドライラン、適用、ロールバックはまだ実装されていません。
-
-詳しい手順はREADME.mdを参照してください。
+接続先URL、wp-config.php、暗号鍵、ライセンス・認証情報、セッション、当プラグインの接続状態は保持します。マルチサイト、WordPress版更新、秘密情報込み完全クローン、SSH、クラウド保存は対象外です。
 
 == Installation ==
 
-1. リリースZIPをWordPress管理画面の「プラグインを追加」からアップロードして有効化します。
-2. wp-config.phpにFSYNC_ENCRYPTION_KEYを設定します。
-3. 接続先サイトで受信を有効にし、接続キーを発行します。
-4. 接続元サイトへ接続情報を貼り付けます。
+1. リリースZIPを両サイトへアップロードして有効化します。
+2. wp-config.phpへFSYNC_ENCRYPTION_KEYを設定します。
+3. 受信側で受信を有効にし、一度限りの接続情報を発行します。
+4. 移行元でペアリングし、「移行」からpush / pullとプロファイルを選択します。pullは両方向のペアリングが必要です。
+5. ドライラン、競合、削除、plan_hashを確認して適用します。
 
-OpenSSL拡張が必要です。WordPressマルチサイトには対応していません。
+公開ホスト間はHTTPS、OpenSSL拡張、十分な退避容量が必要です。
 
 == Frequently Asked Questions ==
 
-= このバージョンだけでコンテンツを移行できますか？ =
+= 双方向に自動同期しますか？ =
 
-いいえ。0.1.0は接続、認証、設定、診断の基盤版です。差分エンジンは今後のフェーズで実装します。
+いいえ。操作ごとにpushまたはpullの方向を確定する一方向移行です。
 
-= 設定ファイルに秘密鍵を書けますか？ =
+= 競合や削除は自動適用されますか？ =
 
-書かないでください。秘密情報は管理画面の認証情報ストアへ保存し、設定ファイルからはIDで参照します。
+いいえ。競合は既定で停止します。削除は既定OFFで、設定上の二重許可と対象一覧の再確認が必要です。
+
+= WordPressのバージョンも更新できますか？ =
+
+できません。WordPress本体を扱う場合も同一バージョン間だけです。
+
+= AIから操作できますか？ =
+
+はい。専用トークンとcapabilityを持つStreamable HTTP MCP、およびstdioブリッジを提供します。適用とロールバックには正確な識別子、plan_hash、明示確認が必要です。
 
 == Changelog ==
 
+= 1.0.0 =
+
+* サイト全体の可搬形式、UID、Merkleマニフェスト、三方向差分を追加
+* ドライラン、競合解決、明示削除、適用、検証、receiptを追加
+* 内容アドレス型チャンク転送、スナップショット、自動／手動ロールバックを追加
+* 移行ウィザード、移行REST API、Streamable HTTP MCP、stdioブリッジを追加
+* 公開JSON Schema、OpenAPI、アーキテクチャ、脅威モデル、復旧・運用文書を追加
+
 = 0.1.0 =
 
-* 接続、HMAC署名認証、権限スコープ、鍵失効を追加
-* 暗号化された認証情報ストアを追加
-* JSONC設定、サイト固有スキーマ、検証、履歴を追加
-* 管理画面、診断、監査ログを追加
+* 接続、HMAC署名認証、権限、暗号化認証情報、JSONC設定、診断を追加

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/flares-llc/yamashin-wp-migration/schemas/release-item.schema.json",
+  "title": "Yamashin WP Migration release plan item",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["release_id", "item_key", "target_item_key", "entity_kind", "entity_uid", "action", "source_hash", "target_hash", "base_hash", "payload_hash", "has_relationships", "resolution", "status", "error"],
+  "properties": {
+    "release_id": { "$ref": "#/$defs/id" },
+    "item_key": { "type": "string", "minLength": 1, "maxLength": 191 },
+    "target_item_key": { "type": "string", "maxLength": 191 },
+    "entity_kind": { "enum": ["post", "term", "comment", "user", "option", "table", "file", "runtime"] },
+    "entity_uid": { "type": "string", "maxLength": 36 },
+    "action": { "enum": ["create", "update", "delete", "unchanged", "conflict", "blocked"] },
+    "source_hash": { "$ref": "#/$defs/optionalSha256" },
+    "target_hash": { "$ref": "#/$defs/optionalSha256" },
+    "base_hash": { "$ref": "#/$defs/optionalSha256" },
+    "payload_hash": { "$ref": "#/$defs/optionalSha256" },
+    "has_relationships": { "enum": [false, true, 0, 1, "0", "1"] },
+    "resolution": { "enum": ["", "source", "target", "skip"] },
+    "status": { "type": "string", "maxLength": 16 },
+    "error": { "type": "string" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+    "optionalSha256": { "type": "string", "pattern": "^$|^[a-f0-9]{64}$" }
+  }
+}

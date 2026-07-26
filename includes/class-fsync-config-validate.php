@@ -709,14 +709,48 @@ final class Fsync_Config_Validate
 
         foreach ((array) ($document['sync']['scope']['tables'] ?? array()) as $index => $table) {
             $name = is_array($table) ? (string) ($table['name'] ?? '') : (string) $table;
+            $pointer = '/sync/scope/tables/' . (int) $index;
 
             if (in_array($name, Fsync_Config::PROTECTED_TABLES, true)) {
                 $issues[] = self::issue(
                     self::SEVERITY_ERROR,
                     'protected_table',
-                    '/sync/scope/tables/' . (int) $index,
+                    $pointer,
                     sprintf('テーブル「%s」は同期できません。', $name)
                 );
+            }
+            if (! is_array($table)) {
+                continue;
+            }
+            $identities = array_filter(
+                array(
+                    (string) ($table['uid_column'] ?? ''),
+                    (string) ($table['primary_key'] ?? ''),
+                ),
+                'strlen'
+            );
+            if ($identities === array() && (array) ($table['natural_key'] ?? array()) === array()) {
+                $issues[] = self::issue(
+                    self::SEVERITY_ERROR,
+                    'table_identity_missing',
+                    $pointer,
+                    '独自テーブルにはuid_column、primary_key、またはnatural_keyのいずれかが必要です。'
+                );
+            }
+            $columns = array_merge(
+                $identities,
+                (array) ($table['natural_key'] ?? array()),
+                array_keys((array) ($table['refs'] ?? array())),
+                array_keys((array) ($table['portable'] ?? array()))
+            );
+            foreach ($columns as $column) {
+                if (preg_match('/^[A-Za-z0-9_]+$/', (string) $column) !== 1) {
+                    $issues[] = self::issue(self::SEVERITY_ERROR, 'table_column_invalid', $pointer, '独自テーブルの列名が不正です。');
+                    break;
+                }
+            }
+            if (count((array) ($table['natural_key'] ?? array())) !== count(array_unique((array) ($table['natural_key'] ?? array())))) {
+                $issues[] = self::issue(self::SEVERITY_ERROR, 'table_natural_key_duplicate', $pointer . '/natural_key', 'natural_keyの列が重複しています。');
             }
         }
 
@@ -877,12 +911,12 @@ final class Fsync_Config_Validate
             }
 
             foreach ((array) ($environment['transport'] ?? array()) as $index => $transport) {
-                if (! in_array((string) $transport, array('https', 'ssh'), true)) {
+                if ((string) $transport !== 'https') {
                     $issues[] = self::issue(
                         self::SEVERITY_ERROR,
                         'invalid_transport',
                         $pointer . '/transport/' . (int) $index,
-                        'transport は https または ssh です。'
+                        'v1.0.0のtransportはhttpsのみです。'
                     );
                 }
             }
@@ -929,46 +963,17 @@ final class Fsync_Config_Validate
             $pointer = '/storage/' . self::escape_pointer((string) $name);
             $type = (string) ($target['type'] ?? '');
 
-            if (! in_array($type, array('local', 'gcs', 'gdrive'), true)) {
+            if ($type !== 'local') {
                 $issues[] = self::issue(
                     self::SEVERITY_ERROR,
                     'invalid_storage_type',
                     $pointer . '/type',
-                    'storage.type は local / gcs / gdrive のいずれかです。'
+                    'v1.0.0のstorage.typeはlocalのみです。'
                 );
 
                 continue;
             }
 
-            if ($type === 'gcs' && empty($target['bucket'])) {
-                $issues[] = self::issue(
-                    self::SEVERITY_ERROR,
-                    'missing_bucket',
-                    $pointer . '/bucket',
-                    'GCS には bucket が必要です。'
-                );
-            }
-
-            // A service account has no personal Drive storage quota, so an
-            // upload aimed at anything but a shared drive fails with an opaque
-            // storageQuotaExceeded at runtime.
-            if ($type === 'gdrive' && empty($target['shared_drive_id']) && empty($target['oauth'])) {
-                $issues[] = self::issue(
-                    self::SEVERITY_ERROR,
-                    'missing_shared_drive',
-                    $pointer . '/shared_drive_id',
-                    'Google Drive には共有ドライブIDが必要です。サービスアカウントには個人ドライブの容量がありません。'
-                );
-            }
-
-            if ($type !== 'local' && empty($target['credential'])) {
-                $issues[] = self::issue(
-                    self::SEVERITY_ERROR,
-                    'missing_storage_credential',
-                    $pointer . '/credential',
-                    'クラウドストレージには credential が必要です。'
-                );
-            }
         }
 
         $destinations = array_merge(array('local'), array_keys($storage));

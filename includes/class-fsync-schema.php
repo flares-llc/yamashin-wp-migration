@@ -24,7 +24,11 @@ final class Fsync_Schema
      */
     public static function register_hooks()
     {
-        add_action('admin_init', [self::class, 'maybe_upgrade']);
+        // Plugin updates do not run the activation hook. Upgrade on every
+        // request type (REST, cron, CLI and admin), with the stored version as
+        // the cheap fast-path, so a newly added migration route never reaches
+        // a database that still has the previous schema.
+        add_action('init', [self::class, 'maybe_upgrade'], 1);
     }
 
     /**
@@ -48,13 +52,29 @@ final class Fsync_Schema
      */
     public static function install()
     {
+        global $wpdb;
+
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
         foreach (self::definitions() as $sql) {
             dbDelta($sql);
         }
 
+        foreach (array_keys(self::tables()) as $name) {
+            $table = self::table($name);
+            $exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table)));
+            if ($exists !== $table) {
+                return new WP_Error(
+                    'fsync_schema_install_failed',
+                    sprintf('必要なテーブルを作成できません: %s', $table),
+                    array('database_error' => (string) $wpdb->last_error)
+                );
+            }
+        }
+
         update_option(self::OPTION_SCHEMA_VERSION, FSYNC_SCHEMA_VERSION, false);
+
+        return true;
     }
 
     /**
@@ -99,6 +119,14 @@ final class Fsync_Schema
             'peers' => 'ピア（環境）台帳',
             'audit' => '監査ログ',
             'config_history' => '設定の変更履歴',
+            'entities' => '可搬UIDとローカルIDの対応',
+            'manifests' => 'サイト状態のMerkleマニフェスト',
+            'releases' => '不変な移行リリース',
+            'release_items' => 'リリース内の差分項目',
+            'jobs' => '再開可能なバックグラウンド処理',
+            'snapshots' => '適用前スナップショット',
+            'receipts' => '適用・検証済みリリースの受領証',
+            'mcp_tokens' => 'AIクライアント用アクセストークン',
         );
     }
 
@@ -221,6 +249,154 @@ final class Fsync_Schema
             user_id bigint(20) unsigned NOT NULL DEFAULT 0,
             PRIMARY KEY  (id),
             KEY ts (ts)
+        ) {$charset_collate};";
+
+        $table = self::table('entities');
+        $definitions[] = "CREATE TABLE {$table} (
+            entity_kind varchar(32) NOT NULL,
+            entity_uid varchar(36) NOT NULL,
+            local_id bigint(20) unsigned NOT NULL DEFAULT 0,
+            identity_key varchar(191) NOT NULL DEFAULT '',
+            peer_id varchar(32) NOT NULL DEFAULT '',
+            current_hash varchar(64) NOT NULL DEFAULT '',
+            base_hash varchar(64) NOT NULL DEFAULT '',
+            updated_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY  (entity_kind, entity_uid),
+            KEY local_entity (entity_kind, local_id),
+            KEY identity_key (identity_key),
+            KEY peer_id (peer_id)
+        ) {$charset_collate};";
+
+        $table = self::table('manifests');
+        $definitions[] = "CREATE TABLE {$table} (
+            manifest_id varchar(32) NOT NULL,
+            peer_id varchar(32) NOT NULL DEFAULT '',
+            scope_fingerprint varchar(64) NOT NULL DEFAULT '',
+            root_hash varchar(64) NOT NULL DEFAULT '',
+            item_count bigint(20) unsigned NOT NULL DEFAULT 0,
+            total_bytes bigint(20) unsigned NOT NULL DEFAULT 0,
+            path varchar(255) NOT NULL DEFAULT '',
+            created_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY  (manifest_id),
+            KEY root_hash (root_hash),
+            KEY peer_id (peer_id)
+        ) {$charset_collate};";
+
+        $table = self::table('releases');
+        $definitions[] = "CREATE TABLE {$table} (
+            release_id varchar(32) NOT NULL,
+            peer_id varchar(32) NOT NULL DEFAULT '',
+            direction varchar(16) NOT NULL DEFAULT 'push',
+            status varchar(24) NOT NULL DEFAULT 'draft',
+            manifest_id varchar(32) NOT NULL DEFAULT '',
+            base_receipt_id varchar(32) NOT NULL DEFAULT '',
+            scope_fingerprint varchar(64) NOT NULL DEFAULT '',
+            config_hash varchar(64) NOT NULL DEFAULT '',
+            plan_hash varchar(64) NOT NULL DEFAULT '',
+            confirmation_hash varchar(64) NOT NULL DEFAULT '',
+            idempotency_hash varchar(64) NOT NULL DEFAULT '',
+            summary longtext NOT NULL,
+            created_by bigint(20) unsigned NOT NULL DEFAULT 0,
+            created_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            updated_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY  (release_id),
+            KEY peer_id (peer_id),
+            KEY idempotency_hash (idempotency_hash),
+            KEY status (status),
+            KEY created_at (created_at)
+        ) {$charset_collate};";
+
+        $table = self::table('release_items');
+        $definitions[] = "CREATE TABLE {$table} (
+            release_id varchar(32) NOT NULL,
+            item_key varchar(191) NOT NULL,
+            target_item_key varchar(191) NOT NULL DEFAULT '',
+            entity_kind varchar(32) NOT NULL DEFAULT '',
+            entity_uid varchar(36) NOT NULL DEFAULT '',
+            action varchar(16) NOT NULL DEFAULT 'unchanged',
+            source_hash varchar(64) NOT NULL DEFAULT '',
+            target_hash varchar(64) NOT NULL DEFAULT '',
+            base_hash varchar(64) NOT NULL DEFAULT '',
+            payload_hash varchar(64) NOT NULL DEFAULT '',
+            has_relationships tinyint(1) unsigned NOT NULL DEFAULT 0,
+            resolution varchar(16) NOT NULL DEFAULT '',
+            status varchar(16) NOT NULL DEFAULT 'pending',
+            error text NOT NULL,
+            PRIMARY KEY  (release_id, item_key),
+            KEY release_action (release_id, action),
+            KEY release_status (release_id, status)
+        ) {$charset_collate};";
+
+        $table = self::table('jobs');
+        $definitions[] = "CREATE TABLE {$table} (
+            job_id varchar(32) NOT NULL,
+            release_id varchar(32) NOT NULL DEFAULT '',
+            operation varchar(32) NOT NULL DEFAULT '',
+            status varchar(24) NOT NULL DEFAULT 'queued',
+            phase varchar(32) NOT NULL DEFAULT '',
+            cursor_pos bigint(20) unsigned NOT NULL DEFAULT 0,
+            attempts int(10) unsigned NOT NULL DEFAULT 0,
+            progress bigint(20) unsigned NOT NULL DEFAULT 0,
+            total bigint(20) unsigned NOT NULL DEFAULT 0,
+            payload longtext NOT NULL,
+            result longtext NOT NULL,
+            error text NOT NULL,
+            heartbeat_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            created_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            updated_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY  (job_id),
+            KEY release_id (release_id),
+            KEY status (status),
+            KEY heartbeat_at (heartbeat_at)
+        ) {$charset_collate};";
+
+        $table = self::table('snapshots');
+        $definitions[] = "CREATE TABLE {$table} (
+            snapshot_id varchar(32) NOT NULL,
+            release_id varchar(32) NOT NULL DEFAULT '',
+            status varchar(16) NOT NULL DEFAULT 'ready',
+            manifest_hash varchar(64) NOT NULL DEFAULT '',
+            path varchar(255) NOT NULL DEFAULT '',
+            size_bytes bigint(20) unsigned NOT NULL DEFAULT 0,
+            created_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            expires_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            restored_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY  (snapshot_id),
+            KEY release_id (release_id),
+            KEY expires_at (expires_at)
+        ) {$charset_collate};";
+
+        $table = self::table('receipts');
+        $definitions[] = "CREATE TABLE {$table} (
+            receipt_id varchar(32) NOT NULL,
+            release_id varchar(32) NOT NULL DEFAULT '',
+            peer_id varchar(32) NOT NULL DEFAULT '',
+            source_env varchar(64) NOT NULL DEFAULT '',
+            target_env varchar(64) NOT NULL DEFAULT '',
+            manifest_root varchar(64) NOT NULL DEFAULT '',
+            plan_hash varchar(64) NOT NULL DEFAULT '',
+            status varchar(16) NOT NULL DEFAULT 'verified',
+            data longtext NOT NULL,
+            applied_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY  (receipt_id),
+            UNIQUE KEY release_id (release_id),
+            KEY peer_id (peer_id),
+            KEY applied_at (applied_at)
+        ) {$charset_collate};";
+
+        $table = self::table('mcp_tokens');
+        $definitions[] = "CREATE TABLE {$table} (
+            token_id varchar(32) NOT NULL,
+            label varchar(191) NOT NULL DEFAULT '',
+            token_hash varchar(64) NOT NULL DEFAULT '',
+            capabilities longtext NOT NULL,
+            origin_allowlist longtext NOT NULL,
+            status varchar(16) NOT NULL DEFAULT 'active',
+            last_used_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            created_at bigint(20) unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY  (token_id),
+            UNIQUE KEY token_hash (token_hash),
+            KEY status (status)
         ) {$charset_collate};";
 
         return $definitions;

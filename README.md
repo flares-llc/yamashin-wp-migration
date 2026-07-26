@@ -4,209 +4,142 @@
 
 # Yamashin WP Migration
 
-山真研究室が開発する、WordPress 環境間の安全な差分移行を目指すプラグインです。
+山真研究室が、自分たちのWordPress運用のために開発している一方向・差分移行プラグインです。ローカル／ステージング／本番を明示的に接続し、`push`または`pull`ごとに移行方向を固定します。自動の双方向同期は行いません。
 
-現在の v0.1.0 は、接続、HMAC 署名認証、設定検証、診断を提供する**基盤版**です。投稿・メディアの差分検知、ドライラン、適用、ロールバックはまだ実装されていません。
+[最新版を無料ダウンロード](https://github.com/flares-llc/yamashin-wp-migration/releases/latest)
 
-- [最新版を無料ダウンロード](https://github.com/flares-llc/yamashin-wp-migration/releases/latest)
-- [ソースコードを見る](https://github.com/flares-llc/yamashin-wp-migration)
+## できること
 
-将来的にはサイト全体を一括置換せず、必要なエンティティだけを対象に、**ドリフト検知 → ドライラン → 最小差分の適用 → 失敗時のロールバック**を行うことを目標にしています。
+- 投稿、固定ページ、CPT、分類、メタ、コメント、添付、Uploads、ユーザー、許可したオプション、登録済み独自テーブルを移行
+- テーマ、プラグイン、mu-plugin、同一バージョンのWordPress本体を内容ハッシュで比較・転送
+- 可搬UID、正規化JSON、SHA-256、256個のMerkleバケットによる差分検知
+- 前回の検証済みreceiptを共通基点にした三方向差分と、項目単位の競合解決
+- 容量・権限・バージョン・必要オブジェクトを検査するドライラン
+- `plan_hash`と一度限りの確認値で拘束された適用、明示確認式の削除
+- 適用前スナップショット、自動ロールバック、保持期間中の手動ロールバック
+- HMAC署名REST APIと、専用トークンで使うStreamable HTTP MCP
+- 再開可能なチャンク転送、ハッシュ検証、再送、重複排除
+- 100項目単位の再開可能な適用jobと、接続元から接続先への中止・ロールバック伝播
+- 同一manifestをステージングで検証したreceiptを条件にできる本番昇格ゲート
 
-## 現在の実装状況
+## 安全境界
 
-フェーズ 1（基盤・設定・認証）と、その動作を確認するための管理画面まで。差分エンジン本体は次のフェーズ。
+- 受信はサイトごとに明示的に有効化し、公開ホスト間はHTTPS必須
+- 競合は既定で停止、削除は既定OFF。削除には全体許可、対象スコープ許可、確定対象一覧の再確認が必要
+- `siteurl`、`home`、`wp-config.php`、暗号鍵、認証・ライセンス情報、cron、当プラグインの接続状態は移行しない
+- ユーザーはloginで統合し、セッションは移行しない。パスワードハッシュは設定で明示した場合のみ移行
+- 現在の管理者と最後の管理者は削除せず、移行先の緊急管理経路を残す
+- WordPress本体は同一バージョンだけを対象とし、バージョン更新機能としては使用しない
 
-| 機能 | 状態 |
-|---|---|
-| ペアリング＋HMAC 署名認証、権限スコープ、失効、監査ログ | 実装済み |
-| 認証情報の暗号化保存（書き込み専用 UI） | 実装済み |
-| JSON 設定（ファイル優先・JSONC・環境オーバーレイ・検証・履歴） | 実装済み |
-| 設定ビルダー、診断画面 | 実装済み |
-| 3 環境の Docker 検証環境 | 実装済み |
-| 差分エンジン（可搬形式・三方向差分・ドライラン・適用） | 未着手 |
-| リリース昇格、バックアップ、クラウド、スケジュール | 未着手 |
-
-**デバッグ・引き継ぎ時は [HANDOFF.md](HANDOFF.md) を先に読むこと**（修正履歴・検証済み/弱い領域・環境固有の落とし穴）。
+対応外: WordPress Multisite、WordPress版更新、秘密情報込み完全クローン、SSH、GCS／Google Drive保存。
 
 ## 要件
 
-- PHP 8.0 以上
-- WordPress 6.0 以上
-- OpenSSL 拡張（認証情報の暗号化に必須）
-- マルチサイトは非対応
+- WordPress 6.0以上（同一版の環境間で使用）
+- PHP 8.0以上
+- MySQL 5.7以上またはMariaDB 10.4以上を推奨
+- OpenSSL、JSON、hash拡張
+- 書き込み可能な`wp-content`と、変更対象以上の退避容量
 
 ## セットアップ
 
-### 1. 暗号化キーを設定する
+1. [releases/latest](https://github.com/flares-llc/yamashin-wp-migration/releases/latest)からZIPを取得し、両サイトへインストールします。
+2. 両サイトの`wp-config.php`へ、別途安全に生成した`FSYNC_ENCRYPTION_KEY`を設定します。
+3. 受信側の「Yamashin WP Migration → 接続」で受信を有効にし、用途に合う権限の接続情報を発行します。
+4. 移行元へ一度限りの接続情報を貼り付けます。
+5. 「移行」で接続先、`push` / `pull`、プロファイルを選び、転送を完了させます。`pull`は接続先からこのサイトへ戻る方向にも同じ手順でペアリングしておきます。
+6. 差分、競合、削除、容量、警告と`plan_hash`を確認してから適用します。
 
-**これを最初にやること。** 省略すると WordPress のソルト由来のキーが使われ、**ソルトを再生成した瞬間に保存済みの認証情報がすべて復号できなくなる**。しかもエラーからは原因が分からない。
-
-`wp-config.php` に追加：
-
-```php
-define('FSYNC_ENCRYPTION_KEY', '...');
-```
-
-値は「診断」画面が生成して表示する。
-
-### 2. 受信側を有効にする
-
-同期を受ける側（ステージング・本番）で「接続」画面から受信を許可する。
-
-受信の可否は**設定ファイルからは切り替えられない**。設定ファイルはリポジトリにコミットされて環境間を移動するので、それが書き込み先を変えられてしまうと事故になる。各サイトで明示的に操作する必要がある。
-
-### 3. ペアリング
-
-1. 受信側で「接続キーを発行」。権限プリセットを選ぶ
-2. 一度だけ表示される文字列をコピー
-3. 接続元の「接続情報を貼り付け」に貼って「接続する」
-
-共有シークレットが通信経路に乗るのはこの 1 回だけ。以降のリクエストは HMAC-SHA256 署名で認証され、シークレット自体は送られない。貼り付けが完了すると接続情報は無効になる。
-
-**権限プリセット**
-
-| プリセット | 用途 |
-|---|---|
-| 読み取り専用 | 定期的なドリフト監視。書き込み権限が無いので、鍵が漏れても本番を書き換えられない |
-| 同期・昇格 | 通常の運用 |
-| すべて | 復元・ロールバックを含む |
+暗号化キーを省略するとWordPressソルト由来になります。ソルト変更時に保存済み認証情報を復号できなくなるため、固定の`FSYNC_ENCRYPTION_KEY`を推奨します。
 
 ## 設定
 
-設定は **1 つの JSON ドキュメント**が正。AI が生成・編集することを前提にしている。
+設定は管理画面、または`wp-content/flares-sync.config.jsonc`で管理します。ファイルが存在する場合はファイルが正となり、管理画面からの上書きを拒否します。秘密値は設定へ書かず、認証情報ストアのIDだけを参照してください。
 
-`flares-sync.config.example.jsonc` を次のいずれかにコピーして編集する：
+設定例は[`flares-sync.config.example.jsonc`](flares-sync.config.example.jsonc)です。サイト固有JSON Schemaは管理画面、REST、MCPの`config_schema`から取得できます。
 
-- `wp-content/flares-sync.config.jsonc`（推奨）
-- WordPress ルート直下
-- `FSYNC_CONFIG_FILE` 定数で指定した任意のパス
-
-ファイルがあればファイルが正になり、管理画面は読み取り専用になる。ファイルが無ければ管理画面の内容がデータベースに保存される。
-
-### 認証情報は書かない
-
-**設定ファイルに秘密情報を書いてはいけない。** このファイルは git に入る。
+削除は二重の設定が必要です。
 
 ```jsonc
-// 正しい: ID で参照する
-"credential": "gcs-backup"
-
-// 拒否される: 値そのもの
-"private_key": "-----BEGIN PRIVATE KEY-----..."
+{
+  "sync": {
+    "scope": {
+      "post_types": {
+        "post": { "delete": true }
+      }
+    },
+    "policy": { "allow_delete": true }
+  }
+}
 ```
 
-値は「接続」画面の認証情報セクションで登録する。保存後は画面にも API にも二度と現れない（指紋と更新日時だけ表示される）。秘密鍵らしき文字列が設定に含まれていると保存が拒否される。
+この設定だけでは削除されません。ドライラン後、確定した削除一覧をもう一度確認して初めて`plan_hash`へ含まれます。
 
-### 環境ごとの差分
+## AI / MCP
 
-同じファイルを全環境に配る前提なので、2 通りの上書きがある。
+WordPress側のMCP endpoint:
 
-- `sync.scope_overrides.<env>` — 同期スコープの差分。**スコープ指紋は相手環境ごとに別々に計算される**ので、ここで差分を付けても互換性チェックは壊れない
-- `environment_overrides.<env>` — 文書全体への上書き。保存先やスケジュールなど環境固有の値に使う
-
-どちらを使うかは「両サイトで一致している必要があるか」で決まる。スコープは一致必須、接続先や保存先は環境固有。
-
-## AI で設定を書く
-
-管理画面を開かずに完結する。
-
-```
-GET  /wp-json/flares-sync/v1/config/introspect
-GET  /wp-json/flares-sync/v1/config/schema
-POST /wp-json/flares-sync/v1/config/validate
-POST /wp-json/flares-sync/v1/config/apply
+```text
+https://example.com/?rest_route=/flares-sync/v1/mcp
 ```
 
-- **introspect** — 投稿タイプと件数、オプション一覧（autoload 状態と概算サイズ付き）、非コアテーブル、テーマ、プラグイン、ユーザーのログイン名。全 `postmeta` を集計するメタキー統計（シリアライズ率・最大サイズ付き）は重いため、必要な場合だけ `include_meta_keys=true` を指定する
-- **schema** — **このサイト専用に生成された** JSON Schema。実在する投稿タイプ・タクソノミー・オプション名だけが `enum` に入るので、存在しない名前を書くと機械的に弾ける
-- **validate** — エラーを **JSON Pointer**（`/sync/scope/options/allow/3`）で返すので、位置を特定して自力で直せる
-- **apply** — 検証を通ったものだけ保存し、変更されたセクションと環境ごとのスコープ指紋を返す
+管理画面で専用MCPトークンを発行します。トークンはハッシュだけを保存し、平文は一度しか表示しません。読み取り、移行、ロールバックをcapabilityで分離できます。
 
-`validate` と `apply` は `document`（オブジェクト）でも `raw`（JSONC 文字列）でも受け付ける。
+stdioクライアントからは同梱ブリッジを使用します。
 
-認証は署名付きリクエストか、`manage_options` を持つログインユーザーのどちらでもよい。設定適用には「同期・昇格」プリセットに含まれる `write` 権限が必要で、読み取り専用キーでは適用できない。
-
-## 検証環境
-
-3 つの WordPress を立てて、ローカル → ステージング → 本番の流れをそのまま試せる。
-
-```bash
-docker compose up -d
-docker compose --profile setup run --rm setup
+```json
+{
+  "mcpServers": {
+    "yamashin-wp-migration": {
+      "command": "npx",
+      "args": [
+        "--yes",
+        "--package=https://github.com/flares-llc/yamashin-wp-migration/releases/latest/download/yamashin-wp-migration-mcp.tgz",
+        "yamashin-wp-migration-mcp"
+      ],
+      "env": {
+        "FSYNC_SITE_URL": "https://example.com/",
+        "FSYNC_MCP_TOKEN": "one-time-issued-token"
+      }
+    }
+  }
+}
 ```
 
-| | URL | 役割 |
-|---|---|---|
-| local | http://localhost:8091 | リリース作成元 |
-| staging | http://localhost:8092 | 検証ゲート |
-| production | http://localhost:8093 | 昇格先 |
-| mailpit | http://localhost:8094 | メール確認 |
+AI向け入口は[`llms.txt`](llms.txt)、実装規約は[`AGENTS.md`](AGENTS.md)、MCP仕様は[`docs/MCP.md`](docs/MCP.md)です。
 
-管理者は `admin` / `admin`。
+## 公開仕様
 
-**本番役だけ意図的に貧弱な PHP 設定**（`max_execution_time=20`、`upload_max_filesize=2M`）で動かしている。チャンクサイズの交渉と時間予算による中断・再開は、実際にリクエストを打ち切るホスト相手でなければ検証にならない。
+- [アーキテクチャ](docs/ARCHITECTURE.md)
+- [可搬形式](docs/PORTABLE_FORMAT.md)
+- [三方向差分](docs/DIFF_ALGORITHM.md)
+- [REST / OpenAPI](docs/REST_API.md)
+- [MCP](docs/MCP.md)
+- [権限・脅威モデル](docs/THREAT_MODEL.md)
+- [運用](docs/OPERATIONS.md)
+- [復旧](docs/RECOVERY.md)
+- [JSON Schema](schemas/)
 
-### 接続の自動検証
+内部slug、設定ファイル名、REST namespace、DB接頭辞、署名プロトコルは互換性のため`flares-sync`を維持しています。
 
-```bash
-./docker/verify-pairing.sh staging
-./docker/verify-pairing.sh production
-```
-
-2 つの実インストール間で実際に HTTP を往復させて、次を確認する（主要61項目に加え、受信側キー台帳とIP拒否経路を確認）。
-
-- ペアリングが成立し、共有シークレットが認証情報として保存される
-- 認証情報の一覧に値が含まれない（指紋のみ）
-- 同じ接続情報を 2 回使えない
-- 署名ヘッダーが到達している
-- **同一リクエストの再送が 401 で拒否される**（nonce リプレイ）
-- **署名を 1 バイト書き換えると拒否される**
-- **1 時間前のタイムスタンプは、署名が正しくても時刻ずれとして拒否される**
-- introspect が保護対象オプションを一切返さない
-- 再ペアリング後は旧受信キーが失効し、新しいキーだけが有効になる
-- 許可外IPからのペアリング確認は拒否され、接続元の一時状態も巻き戻る
-- ファイル優先設定、REST設定適用・履歴・no-op保存、キーのローテーションと猶予期間
-
-### 接続用 URL について
-
-ペアリング時、接続用 URL には `http://localhost:8092` ではなく **`http://fsync_stg`**（サービス名）を指定する。ブラウザは公開ポート経由、コンテナ同士はサービス名で通信するため。この「実際に接続できる URL は home_url とは限らない」という状況は、ロードバランサー配下や内部ホスト名の本番でも起きるので、接続先 URL は後から編集できる。
-
-### アンインストールの自動検証
-
-```bash
-./docker/verify-uninstall.sh production
-```
-
-指定した Docker サイトでプラグイン状態を一度削除し、6テーブル・オプション・transient・cron が消えることと、非公開保存領域が保持されることを確認する。最後にプラグインを再有効化して受信設定を復元する。**実サイトには使用しないこと。**
-
-## テスト
+## 開発・検証
 
 ```bash
 docker run --rm -v "$PWD":/app -w /app php:8.0-cli php tests/run.php
-# → OK: 341 assertions passed
+docker compose up -d
+docker compose --profile setup run --rm setup
+./docker/verify-pairing.sh staging
+./docker/verify-pairing.sh production
+npm --prefix mcp ci
+npm --prefix mcp run check
 ```
 
-ハッシュ・パス安全性・暗号化・署名・設定検証といった純粋ロジックを、WordPress 無しで検証する。PHP 8.0 で走らせているのは、プラグインが宣言している下限だから。
+Docker環境は`local:8091`、`staging:8092`、`production:8093`です。詳細な検証手順は[`HANDOFF.md`](HANDOFF.md)を参照してください。
 
-同梱の `flares-sync.config.example.jsonc` 自身もこのテストで解析・検証される。ドキュメントとして配っている例が実際に通らないなら、無い方がましなので。
+## 公開方針
 
-## 設計上の判断
-
-いくつかは一見遠回りに見えるので、理由を書いておく。
-
-**Authorization ヘッダーを使わない。** 一部のレンタルサーバーと PHP-CGI 構成は `Authorization` を PHP に渡す前に削除する。Basic 認証方式だとその環境で原因不明の 401 になる。独自ヘッダーにした上で、`/echo` エンドポイントが「どのヘッダーが到達したか」を返すので、削除されていることを特定できる。
-
-**署名対象は URL パスではなく REST ルート。** リクエストは `?rest_route=` 形式で送る（パーマリンク設定に依存しないため）。この形式では URL パスがサイトによって変わってしまうので、ルートを署名する。
-
-**nonce の記録は INSERT の一意制約で行う。** SELECT してから INSERT すると、同時に届いた 2 つの同一リクエストが両方「未使用」と判定される。リプレイ防止が防ぎたいのはまさにその状況なので、データベースに重複を弾かせるしかない。
-
-**nonce テーブルが使えないときは拒否する。** 保護なしで続行する自動フォールバックは入れていない。静かに脆弱になるのは、動かないより悪い。
-
-**オプションは許可リスト方式のみ。** 投稿メタは拒否リスト方式にしている。投稿メタは投稿タイプで既に絞られた著作データだが、オプションはグローバルな機械状態で、危険なのは「知らないうちに増えているキー」（ライセンスキー・他プラグインのインストール状態・cron 配列）だから。
-
-**JSONC のコメント除去はスキャナで書いてある。** 正規表現で書いた実装は URL の `//` を必ず壊す。この設定はサイト URL だらけなので、そこが壊れると全滅する。
+ソースは参照・自己利用のため公開していますが、山真研究室自身の用途を優先するプロジェクトです。Issues、Discussions、機能要望、修正提案、外部Pull Requestは受け付けません。脆弱性だけは[非公開で報告](https://github.com/flares-llc/yamashin-wp-migration/security/advisories/new)してください。詳しくは[`CONTRIBUTING.md`](CONTRIBUTING.md)と[`SECURITY.md`](SECURITY.md)を参照してください。
 
 ## ライセンス
 
-Yamashin WP Migration は [GPL-2.0-or-later](LICENSE) で公開しています。
+[GPL-2.0-or-later](LICENSE) © 山真研究室

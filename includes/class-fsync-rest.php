@@ -29,6 +29,8 @@ final class Fsync_Rest
         Fsync_Rest_Status::register_routes();
         Fsync_Rest_Config::register_routes();
         Fsync_Rest_Keys::register_routes();
+        Fsync_Rest_Migration::register_routes();
+        Fsync_Mcp::register_routes();
     }
 
     /**

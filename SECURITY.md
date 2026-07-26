@@ -4,19 +4,15 @@
 
 | Version | Supported |
 |---|---|
-| 0.1.x | Yes |
+| 1.0.x | Yes |
+| 0.1.x | No |
 
-Only the latest patch release in the supported series receives security fixes.
+最新の1.0系パッチだけをサポートします。
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a suspected vulnerability.
+脆弱性は公開Issue、Discussion、Pull Requestへ書かないでください。[GitHub private vulnerability reporting](https://github.com/flares-llc/yamashin-wp-migration/security/advisories/new)を使用してください。
 
-Use [GitHub private vulnerability reporting](https://github.com/flares-llc/yamashin-wp-migration/security/advisories/new) and include:
+報告には影響バージョン、最小再現手順、想定／実際の挙動、影響、既知の緩和策を含めてください。実環境の認証情報、個人情報、顧客コンテンツは含めないでください。
 
-- affected version;
-- reproduction steps;
-- expected and actual behavior;
-- impact and any known mitigations.
-
-Never include production credentials, personal data, or private customer content in a report.
+一般の不具合報告、機能要望、修正提案は受け付けていません。

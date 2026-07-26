@@ -1,0 +1,3 @@
+このリポジトリは外部からのPull Request、修正提案、機能要望を受け付けていません。
+
+脆弱性は公開PRに書かず、Security Policyのprivate vulnerability reportingを使用してください。

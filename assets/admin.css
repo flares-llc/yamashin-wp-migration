@@ -63,3 +63,64 @@
     display: inline-block;
     margin-right: .4em;
 }
+
+.fsync-admin {
+    max-width: 1180px;
+}
+
+.fsync-panel {
+    margin: 20px 0;
+    padding: 20px 24px;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+    background: #fff;
+}
+
+.fsync-panel > h2:first-child {
+    margin-top: 0;
+}
+
+.fsync-release {
+    margin: 12px 0;
+    padding: 12px 16px;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+}
+
+.fsync-release > summary {
+    cursor: pointer;
+}
+
+.fsync-counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0;
+    padding: 0;
+    list-style: none;
+}
+
+.fsync-counts li {
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: #f0f0f1;
+}
+
+.fsync-error {
+    color: #b32d2e;
+}
+
+.fsync-warning {
+    color: #8a5700;
+}
+
+@media (max-width: 782px) {
+    .fsync-panel {
+        padding: 16px;
+    }
+
+    .fsync-panel .widefat {
+        display: block;
+        overflow-x: auto;
+    }
+}

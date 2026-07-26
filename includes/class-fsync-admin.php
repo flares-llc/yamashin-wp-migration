@@ -48,6 +48,15 @@ final class Fsync_Admin
 
         add_submenu_page(
             self::SLUG,
+            '移行',
+            '移行',
+            self::CAPABILITY,
+            self::SLUG . '-migration',
+            [Fsync_Admin_Migration::class, 'render']
+        );
+
+        add_submenu_page(
+            self::SLUG,
             '設定',
             '設定',
             self::CAPABILITY,
@@ -99,7 +108,8 @@ final class Fsync_Admin
 
         $handlers = array_merge(
             Fsync_Admin_Connection::handlers(),
-            Fsync_Admin_Config::handlers()
+            Fsync_Admin_Config::handlers(),
+            Fsync_Admin_Migration::handlers()
         );
 
         if (! isset($handlers[$action])) {
