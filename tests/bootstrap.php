@@ -193,9 +193,9 @@ function wp_remote_retrieve_response_code($response)
 // Plugin constants and classes
 // ---------------------------------------------------------------------------
 
-define('FSYNC_VERSION', '0.1.0-test');
+define('FSYNC_VERSION', '1.0.0-test');
 define('FSYNC_SLUG', 'flares-sync');
-define('FSYNC_SCHEMA_VERSION', 1);
+define('FSYNC_SCHEMA_VERSION', 5);
 define('FSYNC_HASH_ALGO_VERSION', 1);
 define('FSYNC_PROTOCOL', 'FSYNC1');
 define('FSYNC_REST_NAMESPACE', 'flares-sync/v1');
@@ -213,6 +213,10 @@ require_once __DIR__ . '/../includes/class-fsync-config-io.php';
 require_once __DIR__ . '/../includes/class-fsync-config.php';
 require_once __DIR__ . '/../includes/class-fsync-config-schema.php';
 require_once __DIR__ . '/../includes/class-fsync-config-validate.php';
+require_once __DIR__ . '/../includes/class-fsync-store.php';
+require_once __DIR__ . '/../includes/class-fsync-identity.php';
+require_once __DIR__ . '/../includes/class-fsync-portable.php';
+require_once __DIR__ . '/../includes/class-fsync-diff.php';
 
 // ---------------------------------------------------------------------------
 // Test harness

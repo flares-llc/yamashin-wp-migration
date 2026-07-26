@@ -1,0 +1,39 @@
+# Yamashin WP Migration
+
+> WordPress環境間の明示的な一方向差分移行。ドライラン、競合解決、スナップショット、ロールバック、REST、MCPを提供する。
+
+Canonical repository: https://github.com/flares-llc/yamashin-wp-migration
+Latest download: https://github.com/flares-llc/yamashin-wp-migration/releases/latest
+License: GPL-2.0-or-later
+
+## Documentation
+
+- README.md — 利用者向け概要、要件、導入、公開方針
+- AGENTS.md — AIと実装者が守る不変条件、検証手順
+- docs/ARCHITECTURE.md — コンポーネント、信頼境界、処理フロー
+- docs/PORTABLE_FORMAT.md — 可搬レコード、マニフェスト、オブジェクト
+- docs/DIFF_ALGORITHM.md — receipt基点の三方向差分と状態遷移
+- docs/REST_API.md — HMAC署名RESTの利用規約
+- docs/openapi.yaml — REST APIの機械可読定義
+- docs/MCP.md — Streamable HTTP MCPとstdioブリッジ
+- docs/THREAT_MODEL.md — 資産、攻撃経路、緩和策、残余リスク
+- docs/OPERATIONS.md — ペアリング、ドライラン、昇格、保守
+- docs/RECOVERY.md — 自動／手動ロールバックと障害復旧
+- schemas/portable-record.schema.json — 可搬レコードJSON Schema
+- schemas/manifest.schema.json — MerkleマニフェストJSON Schema
+- schemas/release.schema.json — 不変release JSON Schema
+- schemas/release-item.schema.json — 項目単位差分・解決JSON Schema
+- schemas/job.schema.json — 再開可能job JSON Schema
+- schemas/receipt.schema.json — 検証済みreceipt JSON Schema
+- schemas/snapshot.schema.json — スナップショットJSON Schema
+
+## Safety rules for AI clients
+
+1. 最初にstatus、introspect、config_schemaを読む。
+2. release_create後、job_continueを確認待ちまで実行する。
+3. create/update/delete/conflict/blocked、容量、警告、正確なplan_hashを人へ提示する。
+4. 競合と削除を解決・確認した後にのみjob_confirmを提案する。
+5. applyまたはrollbackは、ユーザーがその操作と正確な識別子を明示確認した場合だけ実行する。
+6. Multisite、WordPress版更新、秘密情報移行、SSH、クラウド保存を利用可能と説明しない。
+
+外部からのIssue、PR、機能要望は受け付けていない。脆弱性だけを非公開窓口へ案内する。

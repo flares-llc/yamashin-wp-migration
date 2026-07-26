@@ -222,6 +222,43 @@ final class Fsync_Env
         return is_float($free) || is_int($free) ? (int) $free : 0;
     }
 
+    /** Compare the installed Core tree with the official checksum service. */
+    public static function core_checksums()
+    {
+        require_once ABSPATH . 'wp-admin/includes/update.php';
+        if (! function_exists('get_core_checksums')) {
+            return array('available' => false, 'modified' => array(), 'missing' => array(), 'extra' => array());
+        }
+        $checksums = get_core_checksums((string) get_bloginfo('version'), (string) get_locale());
+        if (! is_array($checksums) || $checksums === array()) {
+            return array('available' => false, 'modified' => array(), 'missing' => array(), 'extra' => array());
+        }
+        $modified = array();
+        $missing = array();
+        foreach ($checksums as $relative => $expected) {
+            $path = ABSPATH . ltrim((string) $relative, '/');
+            if (! is_file($path)) {
+                $missing[] = (string) $relative;
+            } elseif (! hash_equals(strtolower((string) $expected), strtolower((string) @md5_file($path)))) {
+                $modified[] = (string) $relative;
+            }
+        }
+        $entries = Fsync_Fs::walk(ABSPATH, array('wp-content', '.htaccess', 'web.config'));
+        $extra = array();
+        if (! is_wp_error($entries)) {
+            foreach ($entries as $entry) {
+                if ($entry['type'] === 'f' && ! array_key_exists($entry['path'], $checksums)) {
+                    $extra[] = $entry['path'];
+                }
+            }
+        }
+        sort($modified, SORT_STRING);
+        sort($missing, SORT_STRING);
+        sort($extra, SORT_STRING);
+
+        return array('available' => true, 'modified' => $modified, 'missing' => $missing, 'extra' => $extra);
+    }
+
     /**
      * Whether MySQL advisory locks are usable.
      *

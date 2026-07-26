@@ -28,7 +28,8 @@ final class Fsync_Config
         'siteurl',
         'home',
 
-        // Theme and plugin activation state belongs to each environment.
+        // Activation is transported only by the authenticated runtime record;
+        // it must never be copied as an ordinary allow-listed option.
         'active_plugins',
         'stylesheet',
         'template',
@@ -156,13 +157,22 @@ final class Fsync_Config
                 'scope' => array(
                     'post_types' => array(),
                     'taxonomies' => array(),
-                    'options' => array('allow' => array()),
+                    'comments' => true,
+                    'comments_delete' => false,
+                    'users' => array(
+                        'enabled' => true,
+                        'passwords' => false,
+                        'delete' => false,
+                    ),
+                    'options' => array('allow' => array(), 'delete' => false),
                     'tables' => array(),
                     'files' => array(
                         'uploads' => true,
                         'theme' => array(),
                         'plugins' => false,
+                        'mu_plugins' => false,
                         'core' => 'checksum-only',
+                        'delete' => false,
                     ),
                     'refs' => array(),
                     'authors' => array('map' => array(), 'fallback' => ''),

@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-version="${1:-0.1.0}"
+version="${1:-1.0.0}"
 ref="${2:-HEAD}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dist_dir="${repo_root}/dist"

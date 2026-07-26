@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/flares-llc/yamashin-wp-migration/schemas/release.schema.json",
+  "title": "Yamashin WP Migration public release",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["release_id", "peer_id", "direction", "status", "manifest_id", "base_receipt_id", "scope_fingerprint", "config_hash", "plan_hash", "summary", "created_by", "created_at", "updated_at"],
+  "properties": {
+    "release_id": { "$ref": "#/$defs/id" },
+    "peer_id": { "type": "string", "pattern": "^[a-f0-9]{16,32}$" },
+    "direction": { "enum": ["push", "pull"] },
+    "status": { "enum": ["built", "awaiting_objects", "dry_run_ready", "applying", "applied", "verified", "failed", "rolled_back", "cancelled"] },
+    "manifest_id": { "$ref": "#/$defs/optionalId" },
+    "base_receipt_id": { "$ref": "#/$defs/optionalId" },
+    "scope_fingerprint": { "$ref": "#/$defs/optionalSha256" },
+    "config_hash": { "$ref": "#/$defs/optionalSha256" },
+    "plan_hash": { "$ref": "#/$defs/optionalSha256" },
+    "summary": { "type": "object" },
+    "created_by": { "type": "integer", "minimum": 0 },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+    "optionalId": { "type": "string", "pattern": "^$|^[a-f0-9]{32}$" },
+    "optionalSha256": { "type": "string", "pattern": "^$|^[a-f0-9]{64}$" }
+  }
+}

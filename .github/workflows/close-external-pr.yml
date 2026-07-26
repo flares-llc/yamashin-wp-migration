@@ -1,0 +1,22 @@
+name: Close external pull requests
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  close:
+    if: ${{ !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain policy and close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr comment "$PR_URL" --body "このリポジトリは山真研究室自身の利用目的で公開しており、外部からの修正提案・Pull Requestは受け付けていません。GPL-2.0-or-laterに従ったフォークでの利用をご検討ください。脆弱性はSecurity Policyの非公開窓口へ報告してください。"
+          gh pr close "$PR_URL"

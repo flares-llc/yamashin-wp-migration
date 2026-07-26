@@ -1,0 +1,424 @@
+openapi: 3.1.0
+info:
+  title: Yamashin WP Migration REST API
+  version: 1.0.0
+  description: Signed one-way WordPress migration API. Paths are relative to the flares-sync/v1 namespace.
+  license:
+    name: GPL-2.0-or-later
+    identifier: GPL-2.0-or-later
+servers:
+  - url: https://{host}/wp-json/flares-sync/v1
+    variables:
+      host:
+        default: wordpress.test
+        description: Hostname of the receiving WordPress site.
+security:
+  - FsyncHmac: []
+paths:
+  /migration/releases:
+    get:
+      summary: List migration releases
+      operationId: listReleases
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+    post:
+      summary: Create an immutable migration release
+      operationId: createRelease
+      requestBody:
+        required: true
+        description: Pull creates a local proxy job and requires pairing in both directions. HMAC-authenticated callers are bound to their peer identity.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key]
+              properties:
+                peer_id: { type: string, pattern: '^[a-f0-9]{16,32}$' }
+                idempotency_key: { $ref: '#/components/schemas/PublicId' }
+                profile: { type: string, enum: [content, full], default: full }
+                direction: { type: string, enum: [push, pull], default: push }
+                start_push: { type: boolean, default: true }
+      responses:
+        '202': { $ref: '#/components/responses/Accepted' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/releases/prepare:
+    post:
+      summary: Prepare an incoming release and calculate its diff
+      operationId: prepareRelease
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [release_id, manifest, environment]
+              properties:
+                release_id: { $ref: '#/components/schemas/PublicId' }
+                manifest: { $ref: '../schemas/manifest.schema.json' }
+                environment: { type: object }
+      responses:
+        '202': { $ref: '#/components/responses/Accepted' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/releases/{release_id}:
+    parameters:
+      - $ref: '#/components/parameters/ReleaseId'
+    get:
+      summary: Read a release and its current plan
+      operationId: getRelease
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/releases/{release_id}/dry-run:
+    parameters:
+      - $ref: '#/components/parameters/ReleaseId'
+    post:
+      summary: Run final dry-run checks and issue a confirmation
+      operationId: finalizeDryRun
+      requestBody: { $ref: '#/components/requestBodies/IdempotentStep' }
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/releases/{release_id}/resolve:
+    parameters:
+      - $ref: '#/components/parameters/ReleaseId'
+    post:
+      summary: Resolve item-level conflicts for an exact plan
+      operationId: resolveConflicts
+      requestBody:
+        $ref: '#/components/requestBodies/PlanResolution'
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/releases/{release_id}/confirm-deletes:
+    parameters:
+      - $ref: '#/components/parameters/ReleaseId'
+    post:
+      summary: Confirm the exact delete set
+      operationId: confirmDeletes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [plan_hash, idempotency_key, confirm]
+              properties:
+                plan_hash: { $ref: '#/components/schemas/Sha256' }
+                idempotency_key: { $ref: '#/components/schemas/PublicId' }
+                confirm: { type: boolean, const: true }
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/releases/{release_id}/apply:
+    parameters:
+      - $ref: '#/components/parameters/ReleaseId'
+    post:
+      summary: Queue application of a confirmed exact plan
+      operationId: applyRelease
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan_hash, confirmation, idempotency_key]
+              properties:
+                plan_hash: { $ref: '#/components/schemas/Sha256' }
+                confirmation: { type: string, pattern: '^[a-f0-9]{48}$' }
+                idempotency_key: { $ref: '#/components/schemas/PublicId' }
+      responses:
+        '202': { $ref: '#/components/responses/Accepted' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/manifests/{manifest_id}:
+    get:
+      summary: Read a normalized manifest
+      operationId: getManifest
+      parameters:
+        - name: manifest_id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/PublicId' }
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/manifests/{manifest_id}/buckets/{bucket}:
+    get:
+      summary: Read one Merkle manifest bucket
+      operationId: getManifestBucket
+      parameters:
+        - name: manifest_id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/PublicId' }
+        - name: bucket
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{2}$' }
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/objects/{object_hash}:
+    post:
+      summary: Upload or resume one content-addressed object
+      operationId: uploadObjectChunk
+      parameters:
+        - name: object_hash
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Sha256' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [offset, total, data]
+              properties:
+                offset: { type: integer, minimum: 0 }
+                total: { type: integer, minimum: 0 }
+                data: { type: string, contentEncoding: base64 }
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/objects/batch:
+    post:
+      summary: Upload a bounded batch of small objects
+      operationId: uploadSmallObjectBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [objects]
+              properties:
+                objects:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [hash, total, data]
+                    properties:
+                      hash: { $ref: '#/components/schemas/Sha256' }
+                      total: { type: integer, minimum: 0, maximum: 131072 }
+                      data: { type: string, contentEncoding: base64 }
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/jobs/{job_id}:
+    get:
+      summary: Read a resumable job
+      operationId: getJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/jobs:
+    get:
+      summary: List recent resumable jobs
+      operationId: listJobs
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/jobs/{job_id}/continue:
+    post:
+      summary: Continue the next bounded job step
+      operationId: continueJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      requestBody: { $ref: '#/components/requestBodies/IdempotentStep' }
+      responses:
+        '202': { $ref: '#/components/responses/Accepted' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/jobs/{job_id}/resolve:
+    post:
+      summary: Resolve conflicts on the remote job plan
+      operationId: resolveRemoteJobConflicts
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      requestBody:
+        $ref: '#/components/requestBodies/PlanResolution'
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/jobs/{job_id}/confirm-deletes:
+    post:
+      summary: Confirm the exact remote delete set
+      operationId: confirmRemoteJobDeletes
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [plan_hash, idempotency_key, confirm]
+              properties:
+                plan_hash: { $ref: '#/components/schemas/Sha256' }
+                idempotency_key: { $ref: '#/components/schemas/PublicId' }
+                confirm: { type: boolean, const: true }
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/jobs/{job_id}/confirm:
+    post:
+      summary: Confirm and apply the reviewed remote plan
+      operationId: confirmRemoteJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [plan_hash, idempotency_key, confirm]
+              properties:
+                plan_hash: { $ref: '#/components/schemas/Sha256' }
+                idempotency_key: { $ref: '#/components/schemas/PublicId' }
+                confirm: { type: boolean, const: true }
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/jobs/{job_id}/cancel:
+    post:
+      summary: Cancel a queued or running job
+      operationId: cancelJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      requestBody: { $ref: '#/components/requestBodies/IdempotentStep' }
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/snapshots:
+    get:
+      summary: List retained rollback snapshots
+      operationId: listSnapshots
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/snapshots/{snapshot_id}/rollback:
+    post:
+      summary: Restore a snapshot for an exact plan
+      operationId: rollbackSnapshot
+      parameters:
+        - name: snapshot_id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/PublicId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [plan_hash, idempotency_key, confirm]
+              properties:
+                plan_hash: { $ref: '#/components/schemas/Sha256' }
+                idempotency_key: { $ref: '#/components/schemas/PublicId' }
+                confirm: { type: boolean, const: true }
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /migration/receipts:
+    get:
+      summary: List verified migration receipts
+      operationId: listReceipts
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '400': { $ref: '#/components/responses/JsonError' }
+  /mcp:
+    post:
+      summary: Exchange Streamable HTTP MCP JSON-RPC messages
+      operationId: streamableHttpMcp
+      security:
+        - McpBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { $ref: '#/components/responses/JsonSuccess' }
+        '202': { description: MCP notification accepted }
+        '400': { $ref: '#/components/responses/JsonError' }
+components:
+  securitySchemes:
+    FsyncHmac:
+      type: apiKey
+      in: header
+      name: X-Fsync-Signature
+      description: Requires the complete X-Fsync signing header set.
+    McpBearer:
+      type: http
+      scheme: bearer
+  schemas:
+    PublicId: { type: string, pattern: '^[a-f0-9]{32}$' }
+    Sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+  parameters:
+    ReleaseId:
+      name: release_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/PublicId' }
+    JobId:
+      name: job_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/PublicId' }
+  requestBodies:
+    IdempotentStep:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [idempotency_key]
+            properties:
+              idempotency_key: { $ref: '#/components/schemas/PublicId' }
+    PlanResolution:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [plan_hash, resolutions, idempotency_key]
+            properties:
+              plan_hash: { $ref: '#/components/schemas/Sha256' }
+              idempotency_key: { $ref: '#/components/schemas/PublicId' }
+              resolutions:
+                type: object
+                additionalProperties: { type: string, enum: [source, target, skip] }
+  responses:
+    JsonSuccess:
+      description: Successful JSON response
+      content:
+        application/json:
+          schema: { type: object }
+    Accepted:
+      description: Asynchronous operation accepted
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              job: { type: object }
+    JsonError:
+      description: Authentication, validation, conflict, or server error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              code: { type: string }
+              message: { type: string }
+              data: { type: object }

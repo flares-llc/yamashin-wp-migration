@@ -58,6 +58,11 @@ docker compose --profile tools run --rm -T --user root "$CLI_SERVICE" \
         set_transient("fsync_pairing_blob_999999", array("blob" => "test"), HOUR_IN_SECONDS);
         set_transient("fsync_config_draft_999999", "{}", HOUR_IN_SECONDS);
         set_transient("fsync_config_result_999999", array("errors" => array()), HOUR_IN_SECONDS);
+        set_transient("fsync_apply_confirm_999999_test", "test", HOUR_IN_SECONDS);
+        set_transient("fsync_mcp_token_999999", "test", HOUR_IN_SECONDS);
+        update_option("fsync_apply_lock", array("release_id" => "test"), false);
+        update_option("fsync_runtime_guard", array("expires" => time() + 60), false);
+        update_post_meta(1, "_fsync_uid", "00000000-0000-4000-8000-000000000000");
         wp_schedule_single_event(time() + HOUR_IN_SECONDS, "fsync_tick");
         wp_schedule_single_event(time() + HOUR_IN_SECONDS, "fsync_run_now");
     ' --allow-root
@@ -74,7 +79,7 @@ docker compose --profile tools run --rm -T --user root "$CLI_SERVICE" \
         global $wpdb;
         $failures = array();
 
-        foreach (array("credentials", "keys", "nonces", "peers", "audit", "config_history") as $name) {
+        foreach (array("credentials", "keys", "nonces", "peers", "audit", "config_history", "entities", "manifests", "releases", "release_items", "jobs", "snapshots", "receipts", "mcp_tokens") as $name) {
             $table = $wpdb->prefix . "fsync_" . $name;
             if ($wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $table)) === $table) {
                 $failures[] = "table remains: " . $table;
@@ -85,7 +90,7 @@ docker compose --profile tools run --rm -T --user root "$CLI_SERVICE" \
             array(
                 "fsync_config", "fsync_active_env", "fsync_site_role",
                 "fsync_receiver_enabled", "fsync_trusted_proxies",
-                "fsync_crypto_canary", "fsync_schema_version",
+                "fsync_crypto_canary", "fsync_schema_version", "fsync_apply_lock", "fsync_runtime_guard",
             ) as $option
         ) {
             if (get_option($option, null) !== null) {
@@ -104,6 +109,10 @@ docker compose --profile tools run --rm -T --user root "$CLI_SERVICE" \
 
         if (wp_next_scheduled("fsync_tick") !== false || wp_next_scheduled("fsync_run_now") !== false) {
             $failures[] = "scheduled hooks remain";
+        }
+
+        if (get_post_meta(1, "_fsync_uid", true) !== "") {
+            $failures[] = "portable UID meta remains";
         }
 
         if (! file_exists(WP_CONTENT_DIR . "/.flares-sync/uninstall-sentinel")) {
@@ -128,11 +137,11 @@ docker compose --profile tools run --rm -T --user root "$CLI_SERVICE" \
     wp eval '
         global $wpdb;
         $tables = 0;
-        foreach (array("credentials", "keys", "nonces", "peers", "audit", "config_history") as $name) {
+        foreach (array("credentials", "keys", "nonces", "peers", "audit", "config_history", "entities", "manifests", "releases", "release_items", "jobs", "snapshots", "receipts", "mcp_tokens") as $name) {
             $table = $wpdb->prefix . "fsync_" . $name;
             $tables += $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $table)) === $table ? 1 : 0;
         }
-        if ($tables !== 6 || ! Fsync_Auth::receiver_enabled()) {
+        if ($tables !== 14 || ! Fsync_Auth::receiver_enabled()) {
             WP_CLI::error("reactivation did not restore the schema and receiver fixture");
         }
         WP_CLI::success("plugin reactivated and the Docker receiver fixture was restored");

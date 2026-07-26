@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/flares-llc/yamashin-wp-migration/schemas/snapshot.schema.json",
+  "title": "Yamashin WP Migration application snapshot",
+  "type": "object",
+  "required": ["format_version", "snapshot_id", "release_id", "plan_hash", "items", "runtime", "created_at"],
+  "properties": {
+    "format_version": { "const": 1 },
+    "snapshot_id": { "$ref": "#/$defs/id" },
+    "release_id": { "$ref": "#/$defs/id" },
+    "plan_hash": { "$ref": "#/$defs/sha256" },
+    "items": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["kind", "uid", "exists", "payload_hash", "objects", "delete_payload_hash", "delete_record"],
+        "properties": {
+          "kind": { "type": "string" },
+          "uid": { "type": "string" },
+          "exists": { "type": "boolean" },
+          "payload_hash": { "type": "string", "pattern": "^$|^[a-f0-9]{64}$" },
+          "objects": { "type": "array", "items": { "$ref": "#/$defs/sha256" } },
+          "delete_payload_hash": { "type": "string", "pattern": "^$|^[a-f0-9]{64}$" },
+          "delete_record": { "type": "object" }
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["active_plugins", "stylesheet", "template"],
+      "properties": {
+        "active_plugins": { "type": "array", "items": { "type": "string" } },
+        "stylesheet": { "type": "string" },
+        "template": { "type": "string" }
+      }
+    },
+    "created_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

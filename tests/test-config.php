@@ -516,14 +516,20 @@ $gdrive = fsync_test_config(
     array('storage' => array('drive' => array('type' => 'gdrive', 'credential' => 'gd')))
 );
 T::ok(
-    fsync_has_issue(Fsync_Config_Validate::check($gdrive, array('credentials' => array('peer-stg', 'peer-prod', 'gd'))), 'missing_shared_drive'),
-    'Google Drive without a shared drive id is rejected'
+    fsync_has_issue(Fsync_Config_Validate::check($gdrive, array('credentials' => array('peer-stg', 'peer-prod', 'gd'))), 'invalid_storage_type'),
+    'Google Drive storage is not exposed in v1.0.0'
 );
 
 $gcs = fsync_test_config(array('storage' => array('main' => array('type' => 'gcs', 'credential' => 'g'))));
 T::ok(
-    fsync_has_issue(Fsync_Config_Validate::check($gcs, array('credentials' => array('peer-stg', 'peer-prod', 'g'))), 'missing_bucket'),
-    'GCS without a bucket is rejected'
+    fsync_has_issue(Fsync_Config_Validate::check($gcs, array('credentials' => array('peer-stg', 'peer-prod', 'g'))), 'invalid_storage_type'),
+    'GCS storage is not exposed in v1.0.0'
+);
+
+$ssh = fsync_test_config(array('environments' => array('staging' => array('transport' => array('ssh')))));
+T::ok(
+    fsync_has_issue(Fsync_Config_Validate::check($ssh, $context), 'invalid_transport'),
+    'SSH transport is not exposed in v1.0.0'
 );
 
 $dest = fsync_test_config(array('backup' => array('destinations' => array('local', 'nowhere'))));

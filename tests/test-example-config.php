@@ -35,7 +35,7 @@ T::same(
 $result = Fsync_Config_Validate::check(
     $document,
     array(
-        'credentials' => array('peer-staging', 'peer-production', 'gcs-backup', 'slack-ops'),
+        'credentials' => array('peer-staging', 'peer-production', 'slack-ops'),
     )
 );
 
@@ -70,7 +70,7 @@ T::group('shipped example merged with defaults');
 $merged = Fsync_Config_Io::merge(Fsync_Config::defaults(), $document);
 $merged_result = Fsync_Config_Validate::check(
     $merged,
-    array('credentials' => array('peer-staging', 'peer-production', 'gcs-backup', 'slack-ops'))
+    array('credentials' => array('peer-staging', 'peer-production', 'slack-ops'))
 );
 
 T::ok($merged_result['ok'], 'defaults merged with the example still validate');

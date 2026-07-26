@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  php:
+    name: PHP 8.0
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.0'
+          coverage: none
+      - name: Syntax
+        run: find . -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Unit and static tests
+        run: php tests/run.php
+      - name: Public file and whitespace checks
+        run: |
+          git diff --check
+          ! grep -R --line-number -E '/Users/|/home/[^/]+/' README.md readme.txt docs schemas AGENTS.md llms.txt
+      - name: Validate JSON schemas
+        run: python3 -c 'import json, glob; [json.load(open(path)) for path in glob.glob("schemas/*.json")]'
+
+  mcp:
+    name: MCP bridge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.5
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
+      - name: Validate OpenAPI 3.1
+        run: npx --yes @redocly/cli@2.40.0 lint docs/openapi.yaml
+      - name: Compile JSON schemas
+        run: |
+          for schema in schemas/*.json; do
+            npx --yes --package ajv-cli@5.0.0 --package ajv-formats@3.0.1 \
+              ajv compile --spec=draft2020 -c ajv-formats -s "$schema" >/dev/null
+          done
+      - run: npm ci
+        working-directory: mcp
+      - run: npm run check
+        working-directory: mcp
+      - run: npm run build
+        working-directory: mcp
+      - run: npm audit --omit=dev
+        working-directory: mcp

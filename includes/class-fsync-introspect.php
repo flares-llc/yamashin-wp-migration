@@ -307,9 +307,12 @@ final class Fsync_Introspect
         $out = array();
 
         foreach (get_plugins() as $file => $data) {
+            $directory = dirname((string) $file);
             $out[] = array(
                 'file' => (string) $file,
-                'slug' => (string) dirname((string) $file),
+                // dirname() returns "." for a plugin installed as one file.
+                // Its filename is the only selector that can identify it.
+                'slug' => $directory === '.' ? (string) $file : (string) $directory,
                 'name' => (string) ($data['Name'] ?? ''),
                 'version' => (string) ($data['Version'] ?? ''),
                 'active' => in_array($file, $active, true),

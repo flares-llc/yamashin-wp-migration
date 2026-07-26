@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/flares-llc/yamashin-wp-migration/schemas/receipt.schema.json",
+  "title": "Yamashin WP Migration verified receipt",
+  "type": "object",
+  "required": ["receipt_id", "release_id", "peer_id", "source_env", "target_env", "manifest_root", "plan_hash", "status", "data", "applied_at"],
+  "properties": {
+    "receipt_id": { "$ref": "#/$defs/id" },
+    "release_id": { "$ref": "#/$defs/id" },
+    "peer_id": { "type": "string", "pattern": "^[a-f0-9]{16,32}$" },
+    "source_env": { "type": "string" },
+    "target_env": { "type": "string" },
+    "manifest_root": { "$ref": "#/$defs/sha256" },
+    "plan_hash": { "$ref": "#/$defs/sha256" },
+    "status": { "const": "verified" },
+    "data": {
+      "type": "object",
+      "required": ["baseline", "counts", "snapshot_id"],
+      "properties": {
+        "baseline": { "type": "object", "additionalProperties": { "$ref": "#/$defs/sha256" } },
+        "counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "snapshot_id": { "type": "string", "pattern": "^$|^[a-f0-9]{32}$" }
+      }
+    },
+    "applied_at": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}
