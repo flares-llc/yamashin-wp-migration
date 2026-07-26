@@ -30,6 +30,20 @@ jobs:
       - name: Validate JSON schemas
         run: python3 -c 'import json, glob; [json.load(open(path)) for path in glob.glob("schemas/*.json")]'
 
+  php-latest:
+    name: PHP 8.5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+      - name: Syntax
+        run: find . -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Unit and static tests
+        run: php tests/run.php
+
   mcp:
     name: MCP bridge
     runs-on: ubuntu-latest
