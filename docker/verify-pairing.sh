@@ -33,6 +33,11 @@ case "$TARGET" in
 esac
 
 PLUGIN=/var/www/html/wp-content/plugins/flares-sync
+# WordPress stores browser-facing localhost URLs in this fixture, while peers
+# must call the local site through the Compose network. Passing the routable
+# URL explicitly also keeps this verification repeatable after pull tests have
+# already recorded the local peer on staging or production.
+SOURCE_CONNECT_URL=http://fsync_local
 
 echo "=== issuing a pairing blob on ${TARGET} ==="
 
@@ -65,7 +70,7 @@ echo "=== connecting from local ==="
 # directory is not group-writable.
 docker compose --profile tools run --rm -T --user root wpcli_local \
     wp eval-file "$PLUGIN/tests/integration/connect.php" \
-    "$BLOB" "$TARGET" --allow-root
+    "$BLOB" "$TARGET" "$SOURCE_CONNECT_URL" --allow-root
 
 docker compose --profile tools run --rm -T "$CLI_SERVICE" \
     wp eval-file "$PLUGIN/tests/integration/verify-target-key.php" \
@@ -90,7 +95,7 @@ esac
 
 docker compose --profile tools run --rm -T wpcli_local \
     wp eval-file "$PLUGIN/tests/integration/ip-denied.php" \
-    "$DENIED_BLOB" "$DENIED_ENV" --allow-root
+    "$DENIED_BLOB" "$DENIED_ENV" "$SOURCE_CONNECT_URL" --allow-root
 
 # The rejected confirmation deliberately leaves the remote pending key usable
 # from an allowed address. Retire it first to exercise the normal lifecycle,
