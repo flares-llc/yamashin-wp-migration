@@ -48,7 +48,8 @@ npm --prefix mcp audit --omit=dev
 
 ## 検証済み
 
-- PHP 8.0構文と純粋ロジック363 assertions
+- PHP 8.0／8.5構文と純粋ロジック363 assertions（両版とも警告なし）
+- MariaDB 10.6の3サイトfixtureに加え、MySQL 8.4.10のクリーン有効化と14テーブル作成
 - staging／production各61項目の実HTTP認証・設定回帰
 - 初回content移行、2回目unchanged、source update、双方変更conflict、未解決拒否、source/target/skipの遠隔解決経路
 - 全体許可＋scope許可＋一覧再確認によるdelete、delete前拒否、manual rollback
