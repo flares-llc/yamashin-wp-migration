@@ -10,10 +10,10 @@ permissions:
 
 jobs:
   close:
-    if: >-
-      github.event.pull_request.author_association != 'OWNER' &&
-      github.event.pull_request.author_association != 'MEMBER' &&
-      github.event.pull_request.author_association != 'COLLABORATOR'
+    # The repository's own maintenance PRs are created by this account. GitHub
+    # reported MEMBER through the REST API but exposed a different association
+    # value to pull_request_target, so compare the immutable login directly.
+    if: ${{ github.event.pull_request.user.login != 'shinroh' }}
     runs-on: ubuntu-latest
     steps:
       - name: Explain policy and close
