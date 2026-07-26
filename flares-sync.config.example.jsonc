@@ -1,0 +1,217 @@
+{
+  // Copy this to one of the following locations and edit it:
+  //   wp-content/flares-sync.config.jsonc   (recommended)
+  //   <wordpress root>/flares-sync.config.jsonc
+  // or point FSYNC_CONFIG_FILE at it from wp-config.php.
+  //
+  // When this file exists it becomes the single source of truth and the
+  // admin builder turns read-only, so that the screen can never disagree
+  // with what is committed to the repository.
+  //
+  // NEVER put a credential value in this file. Everything here is an id
+  // pointing at a value stored encrypted in the database, registered from
+  // the admin screen. Saving a document containing a private key, a client
+  // secret or a webhook URL is refused.
+  //
+  // There is deliberately no "$schema" key here. A static schema can only
+  // say "post_types is an object"; the schema this site generates says which
+  // post types, taxonomies and option names actually exist on it, so an
+  // agent cannot write a configuration for something that is not registered.
+  //
+  // Fetch it and point your editor at the saved copy:
+  //   curl -o .flares-sync.schema.json \
+  //     "https://your-site.example/wp-json/flares-sync/v1/config/schema"
+
+  "config_version": 1,
+
+  // Which environment this particular installation is. Override per site
+  // with the FSYNC_ACTIVE_ENV setting on the connection screen when the
+  // same file is deployed everywhere.
+  "site_role": "local",
+
+  "sync": {
+    // Everything under "scope" must agree between two sites before they
+    // will sync. It is the only part that feeds scope_fingerprint.
+    "scope": {
+      "post_types": {
+        "page": {
+          "statuses": ["publish", "draft", "private"],
+          // "all" is a denylist: every meta key except the ones listed.
+          // Post meta is already narrowed by post type, so a denylist is
+          // safe here in a way it would not be for options.
+          "meta": { "mode": "all", "deny": ["_wp_page_template_cache"] },
+          "taxonomies": [],
+          "delete": false
+        },
+        "post": {
+          "statuses": ["publish", "draft", "future"],
+          "meta": { "mode": "all" },
+          "taxonomies": ["category", "post_tag"],
+          "delete": false
+        },
+        "attachment": {
+          "statuses": ["inherit"],
+          "meta": { "mode": "all" }
+        }
+      },
+
+      "taxonomies": {
+        "category": { "meta": { "mode": "all" } },
+        "post_tag": { "meta": { "mode": "all" } }
+      },
+
+      // Options are ALLOWLIST ONLY. There is no deny form, deliberately:
+      // the dangerous options are the ones nobody remembered to exclude
+      // (licence keys, other plugins' install state, cron arrays).
+      // Entries wrapped in slashes are regular expressions.
+      "options": {
+        "allow": [
+          "blogdescription",
+          "/^theme_mods_/"
+        ]
+      },
+
+      // Custom plugin tables. Unregistered non-core tables are reported in
+      // the dry run as out of scope rather than silently ignored.
+      "tables": [],
+
+      "files": {
+        "uploads": true,
+        "theme": ["my-theme"],
+        // Plugin files are off by default. Activation state (active_plugins)
+        // is never synced regardless of this setting.
+        "plugins": false,
+        // "checksum-only" compares against the official WordPress checksums
+        // and reports modified, missing and extra core files without
+        // transferring anything. "sync" additionally transfers, and refuses
+        // to run when the two sites are on different WordPress versions.
+        "core": "checksum-only"
+      },
+
+      // Meta keys that hold post/term/user IDs. These are transported as
+      // references and resolved on the far side, never as raw IDs.
+      "refs": {
+        "_thumbnail_id": "post",
+        "related_pages": { "kind": "post", "shape": "serialized_array" }
+      },
+
+      // Users are not synchronised. post_author travels as a login and is
+      // resolved through this map, which keeps password hashes, session
+      // tokens and role capabilities out of the transfer entirely.
+      "authors": {
+        "map": { "devuser": "editor01" },
+        "fallback": "admin"
+      }
+    },
+
+    // Scope differences per environment. The fingerprint is computed per
+    // peer, so an override here does not break the compatibility check.
+    "scope_overrides": {
+      "staging": {
+        "post_types": {
+          "test_fixture": { "statuses": ["publish"], "meta": { "mode": "all" } }
+        }
+      }
+    },
+
+    "policy": {
+      "direction_default": "push",
+      // "manual" stops on a conflict and asks. The other modes exist but
+      // defeat the purpose of a tool built to avoid surprise overwrites.
+      "conflict": "manual",
+      "allow_delete": false,
+      // Extra option names this project must never sync.
+      "protected_extra": ["my_plugin_license_key"]
+    }
+  },
+
+  "environments": {
+    "local": {
+      "role": "source"
+    },
+    "staging": {
+      "url": "https://stg.example.jp/",
+      "credential": "peer-staging",
+      "transport": ["https"],
+      "promotes_to": ["production"]
+    },
+    "production": {
+      "url": "https://example.jp/",
+      "credential": "peer-production",
+      "transport": ["https"],
+      // Production refuses a release that has not been applied and verified
+      // on staging. This is enforced by the production site itself, not by
+      // the UI, so calling the API directly cannot bypass it.
+      "requires_verified_on": ["staging"]
+    }
+  },
+
+  // Applied on top of everything above, per environment, so one committed
+  // file can serve every installation.
+  "environment_overrides": {
+    "production": {
+      "backup": { "destinations": ["local", "gcs-main"] }
+    },
+    "local": {
+      "backup": { "destinations": ["local"] }
+    }
+  },
+
+  "backup": {
+    "categories": [
+      "db.posts",
+      "db.postmeta",
+      "db.terms",
+      "db.options",
+      "files.uploads",
+      "files.theme"
+    ],
+    "retention": { "keep": 10, "safety_backup_days": 7 },
+    "destinations": ["local"]
+  },
+
+  "storage": {
+    "gcs-main": {
+      "type": "gcs",
+      "bucket": "example-wp-backups",
+      "prefix": "example-jp/",
+      "credential": "gcs-backup"
+    }
+    // Google Drive requires a shared drive: a service account has no
+    // personal Drive quota, so uploading to a personal folder fails with
+    // storageQuotaExceeded.
+    //
+    // "gdrive-main": {
+    //   "type": "gdrive",
+    //   "shared_drive_id": "0ABCdefGHIjklMNO",
+    //   "credential": "gdrive-backup"
+    // }
+  },
+
+  "schedules": [
+    {
+      // The highest value job for the lowest risk: read-only, needs no
+      // write capability, and tells you when production has drifted.
+      "name": "nightly-drift",
+      "job": "drift_check",
+      "env": "production",
+      "interval": "fsync_daily",
+      "notify": ["ops-slack"]
+    },
+    {
+      "name": "nightly-backup",
+      "job": "backup",
+      "interval": "fsync_daily",
+      "destinations": ["local"],
+      "notify": ["ops-slack"]
+    }
+  ],
+
+  "notify": {
+    "ops-slack": {
+      "type": "slack",
+      "credential": "slack-ops",
+      "events": ["failed", "stalled", "drift"]
+    }
+  }
+}
