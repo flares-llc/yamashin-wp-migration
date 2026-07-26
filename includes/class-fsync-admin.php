@@ -170,6 +170,22 @@ final class Fsync_Admin
     }
 
     /**
+     * Render the shared product lockup and the current screen label.
+     *
+     * @param string $section
+     * @return void
+     */
+    public static function render_brand_header($section)
+    {
+        printf(
+            '<div class="fsync-brand"><img class="fsync-brand__logo" src="%s" width="1237" height="276" alt=""><span class="fsync-brand__section" aria-hidden="true">/ %s</span><h1 class="screen-reader-text">Yamashin WP Migration — %s</h1></div>',
+            esc_url(FSYNC_URL . 'assets/brand/yamashin-wp-migration-horizontal-transparent.svg'),
+            esc_html($section),
+            esc_html($section)
+        );
+    }
+
+    /**
      * Open a form that posts to the shared dispatcher.
      *
      * @param string $action

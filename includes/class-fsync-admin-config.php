@@ -40,7 +40,7 @@ final class Fsync_Admin_Config
         $file_backed = Fsync_Config_Io::is_file_backed();
 
         print '<div class="wrap fsync">';
-        print '<h1>Yamashin WP Migration — 設定</h1>';
+        Fsync_Admin::render_brand_header('設定');
 
         Fsync_Admin::render_notice();
 

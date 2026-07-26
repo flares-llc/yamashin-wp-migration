@@ -36,7 +36,7 @@ final class Fsync_Admin_Connection
         $blob = get_transient('fsync_pairing_blob_' . get_current_user_id());
 
         print '<div class="wrap fsync">';
-        print '<h1>Yamashin WP Migration — 接続</h1>';
+        Fsync_Admin::render_brand_header('接続');
 
         Fsync_Admin::render_notice();
 

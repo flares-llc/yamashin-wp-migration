@@ -1,0 +1,80 @@
+{
+  "font" : "Avenir Next Medium outlines",
+  "ink" : "#0A0A0A",
+  "markGrid" : {
+    "height" : 257,
+    "width" : 231
+  },
+  "name" : "Yamashin WP Migration",
+  "variants" : {
+    "horizontal" : {
+      "canvas" : [
+        1237,
+        276
+      ],
+      "mark" : [
+        9,
+        9,
+        231,
+        257
+      ],
+      "wordmark" : [
+        289,
+        100,
+        935,
+        76
+      ]
+    },
+    "mark" : {
+      "bounds" : [
+        48,
+        24.5,
+        416,
+        463
+      ],
+      "canvas" : [
+        512,
+        512
+      ]
+    },
+    "ogp" : {
+      "canvas" : [
+        1200,
+        630
+      ],
+      "mark" : [
+        88,
+        92.5,
+        400,
+        445
+      ],
+      "wordmark" : [
+        558,
+        277,
+        570,
+        76
+      ]
+    },
+    "vertical" : {
+      "canvas" : [
+        1254,
+        1254
+      ],
+      "mark" : [
+        307,
+        197,
+        640,
+        713
+      ],
+      "wordmark" : [
+        159.5,
+        971,
+        935,
+        76
+      ]
+    }
+  },
+  "version" : 1,
+  "white" : "#FFFFFF",
+  "wordmark" : "YamashinWPMigration"
+}
